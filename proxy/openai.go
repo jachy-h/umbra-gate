@@ -23,15 +23,10 @@ type openAIResponse struct {
 	Usage openAIUsage `json:"usage"`
 }
 
-type openAIStreamChunk struct {
-	Model string       `json:"model"`
-	Usage *openAIUsage `json:"usage"`
-}
-
 func (p *Proxy) handleOpenAI(w http.ResponseWriter, r *http.Request, providerName string, providerCfg *config.ProviderConfig, target *url.URL, path string) {
 	startTime := time.Now()
 
-	bodyBytes, err := io.ReadAll(r.Body)
+	bodyBytes, err := io.ReadAll(io.LimitReader(r.Body, 10<<20))
 	r.Body.Close()
 	if err != nil {
 		slog.Error("failed to read request body", "error", err)
@@ -78,7 +73,7 @@ func (p *Proxy) proxyOpenAINonStream(w http.ResponseWriter, r *http.Request, pro
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+providerCfg.APIKey)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := p.client.Do(req)
 	if err != nil {
 		errMsg := err.Error()
 		p.db.CompleteSession(sessionID, 0, 0, time.Since(startTime).Milliseconds(), &errMsg)
@@ -98,7 +93,9 @@ func (p *Proxy) proxyOpenAINonStream(w http.ResponseWriter, r *http.Request, pro
 	}
 
 	var oaiResp openAIResponse
-	json.Unmarshal(respBody, &oaiResp)
+	if err := json.Unmarshal(respBody, &oaiResp); err != nil {
+		slog.Warn("failed to parse upstream response", "error", err)
+	}
 
 	durationMs := time.Since(startTime).Milliseconds()
 	promptTokens := int64(oaiResp.Usage.PromptTokens)
@@ -118,7 +115,9 @@ func extractModel(body []byte) string {
 	var req struct {
 		Model string `json:"model"`
 	}
-	json.Unmarshal(body, &req)
+	if err := json.Unmarshal(body, &req); err != nil {
+		slog.Warn("failed to parse request body for model extraction", "error", err)
+	}
 	if req.Model == "" {
 		return "unknown"
 	}
@@ -126,13 +125,17 @@ func extractModel(body []byte) string {
 }
 
 func (p *Proxy) proxyOpenAIStream(w http.ResponseWriter, r *http.Request, providerCfg *config.ProviderConfig, target *url.URL, path string, bodyBytes []byte, sessionID int64, startTime time.Time) {
-	http.Error(w, "streaming not yet implemented", http.StatusNotImplemented)
+	errMsg := "streaming not yet implemented"
+	p.db.CompleteSession(sessionID, 0, 0, time.Since(startTime).Milliseconds(), &errMsg)
+	http.Error(w, errMsg, http.StatusNotImplemented)
 }
 
 func isStreamRequest(body []byte) bool {
 	var req struct {
 		Stream bool `json:"stream"`
 	}
-	json.Unmarshal(body, &req)
+	if err := json.Unmarshal(body, &req); err != nil {
+		slog.Warn("failed to parse request body for stream detection", "error", err)
+	}
 	return req.Stream
 }

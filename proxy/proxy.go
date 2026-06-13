@@ -3,21 +3,28 @@ package proxy
 import (
 	"log/slog"
 	"net/http"
-	"net/http/httputil"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/anomalyco/llm-gateway/config"
 	"github.com/anomalyco/llm-gateway/db"
 )
 
 type Proxy struct {
-	cfg *config.Config
-	db  *db.DB
+	cfg    *config.Config
+	db     *db.DB
+	client *http.Client
 }
 
 func New(cfg *config.Config, database *db.DB) *Proxy {
-	return &Proxy{cfg: cfg, db: database}
+	return &Proxy{
+		cfg: cfg,
+		db:  database,
+		client: &http.Client{
+			Timeout: 120 * time.Second,
+		},
+	}
 }
 
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -61,14 +68,4 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (p *Proxy) handleAnthropic(w http.ResponseWriter, r *http.Request, providerName string, providerCfg *config.ProviderConfig, target *url.URL, path string) {
 	http.Error(w, "anthropic protocol not yet implemented", http.StatusNotImplemented)
-}
-
-func (p *Proxy) singleHostReverseProxy(target *url.URL) *httputil.ReverseProxy {
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	origDirector := proxy.Director
-	proxy.Director = func(req *http.Request) {
-		origDirector(req)
-		req.Host = target.Host
-	}
-	return proxy
 }
