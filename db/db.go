@@ -2,6 +2,8 @@ package db
 
 import (
 	"database/sql"
+	"sort"
+
 	_ "modernc.org/sqlite"
 )
 
@@ -14,11 +16,17 @@ func Open(path string) (*DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	if _, err := conn.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		conn.Close()
+		return nil, err
+	}
 	if err := conn.Ping(); err != nil {
+		conn.Close()
 		return nil, err
 	}
 	db := &DB{conn: conn}
 	if err := db.migrate(); err != nil {
+		conn.Close()
 		return nil, err
 	}
 	return db, nil
@@ -75,14 +83,25 @@ func (d *DB) migrate() error {
 		)`},
 	}
 
+	sort.Slice(migrations, func(i, j int) bool {
+		return migrations[i].version < migrations[j].version
+	})
+
 	for _, m := range migrations {
 		if m.version > currentVersion {
-			_, err = d.conn.Exec(m.sql)
+			tx, err := d.conn.Begin()
 			if err != nil {
 				return err
 			}
-			_, err = d.conn.Exec("INSERT INTO schema_migrations (version) VALUES (?)", m.version)
-			if err != nil {
+			if _, err := tx.Exec(m.sql); err != nil {
+				tx.Rollback()
+				return err
+			}
+			if _, err := tx.Exec("INSERT INTO schema_migrations (version) VALUES (?)", m.version); err != nil {
+				tx.Rollback()
+				return err
+			}
+			if err := tx.Commit(); err != nil {
 				return err
 			}
 		}
