@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/anomalyco/llm-gateway/config"
@@ -21,6 +22,11 @@ type openAIUsage struct {
 type openAIResponse struct {
 	Model string      `json:"model"`
 	Usage openAIUsage `json:"usage"`
+}
+
+type openAIStreamChunk struct {
+	Model string       `json:"model"`
+	Usage *openAIUsage `json:"usage"`
 }
 
 func (p *Proxy) handleOpenAI(w http.ResponseWriter, r *http.Request, providerName string, providerCfg *config.ProviderConfig, target *url.URL, path string) {
@@ -125,9 +131,82 @@ func extractModel(body []byte) string {
 }
 
 func (p *Proxy) proxyOpenAIStream(w http.ResponseWriter, r *http.Request, providerCfg *config.ProviderConfig, target *url.URL, path string, bodyBytes []byte, sessionID int64, startTime time.Time) {
-	errMsg := "streaming not yet implemented"
-	p.db.CompleteSession(sessionID, 0, 0, time.Since(startTime).Milliseconds(), &errMsg)
-	http.Error(w, errMsg, http.StatusNotImplemented)
+	upstreamURL := target.String() + path
+	req, err := http.NewRequestWithContext(r.Context(), "POST", upstreamURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		errMsg := err.Error()
+		p.db.CompleteSession(sessionID, 0, 0, 0, &errMsg)
+		slog.Error("failed to create upstream request", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+providerCfg.APIKey)
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		errMsg := err.Error()
+		p.db.CompleteSession(sessionID, 0, 0, time.Since(startTime).Milliseconds(), &errMsg)
+		slog.Error("upstream request failed", "error", err)
+		http.Error(w, "upstream error", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		errMsg := string(body)
+		p.db.CompleteSession(sessionID, 0, 0, time.Since(startTime).Milliseconds(), &errMsg)
+		w.WriteHeader(resp.StatusCode)
+		w.Write(body)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		errMsg := "streaming not supported"
+		p.db.CompleteSession(sessionID, 0, 0, time.Since(startTime).Milliseconds(), &errMsg)
+		return
+	}
+
+	var promptTokens, completionTokens int64
+	buf := make([]byte, 4096)
+	for {
+		n, readErr := resp.Body.Read(buf)
+		if n > 0 {
+			w.Write(buf[:n])
+			flusher.Flush()
+
+			lines := strings.Split(string(buf[:n]), "\n")
+			for _, line := range lines {
+				line = strings.TrimSpace(line)
+				if !strings.HasPrefix(line, "data: ") {
+					continue
+				}
+				data := strings.TrimPrefix(line, "data: ")
+				if data == "[DONE]" {
+					continue
+				}
+				var chunk openAIStreamChunk
+				if err := json.Unmarshal([]byte(data), &chunk); err == nil && chunk.Usage != nil {
+					promptTokens = int64(chunk.Usage.PromptTokens)
+					completionTokens = int64(chunk.Usage.CompletionTokens)
+				}
+			}
+		}
+		if readErr != nil {
+			break
+		}
+	}
+
+	durationMs := time.Since(startTime).Milliseconds()
+	p.db.CompleteSession(sessionID, promptTokens, completionTokens, durationMs, nil)
+	p.db.CreateRequest(sessionID, promptTokens, completionTokens, durationMs, nil)
 }
 
 func isStreamRequest(body []byte) bool {
