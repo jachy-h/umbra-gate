@@ -4,6 +4,7 @@ import (
 	"embed"
 	"fmt"
 	"html/template"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -12,6 +13,11 @@ import (
 
 //go:embed templates/*
 var templateFS embed.FS
+
+type pageData struct {
+	Active string
+	Stats  *db.Stats
+}
 
 type Handler struct {
 	db   *db.DB
@@ -63,31 +69,27 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) home(w http.ResponseWriter, r *http.Request) {
-	stats, _ := h.db.GetStats()
-	data := map[string]interface{}{
-		"Active": "home",
-		"Stats":  stats,
+	stats, err := h.db.GetStats()
+	if err != nil {
+		slog.Error("failed to get stats", "error", err)
 	}
-	h.tmpl.ExecuteTemplate(w, "layout.html", data)
+	h.render(w, pageData{Active: "home", Stats: stats})
 }
 
 func (h *Handler) sessions(w http.ResponseWriter, r *http.Request) {
-	data := map[string]interface{}{
-		"Active": "sessions",
-	}
-	h.tmpl.ExecuteTemplate(w, "layout.html", data)
+	h.render(w, pageData{Active: "sessions"})
 }
 
 func (h *Handler) sessionDetail(w http.ResponseWriter, r *http.Request) {
-	data := map[string]interface{}{
-		"Active": "sessions",
-	}
-	h.tmpl.ExecuteTemplate(w, "layout.html", data)
+	h.render(w, pageData{Active: "sessions"})
 }
 
 func (h *Handler) models(w http.ResponseWriter, r *http.Request) {
-	data := map[string]interface{}{
-		"Active": "models",
+	h.render(w, pageData{Active: "models"})
+}
+
+func (h *Handler) render(w http.ResponseWriter, data pageData) {
+	if err := h.tmpl.ExecuteTemplate(w, "layout.html", data); err != nil {
+		slog.Error("failed to render template", "error", err)
 	}
-	h.tmpl.ExecuteTemplate(w, "layout.html", data)
 }

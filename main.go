@@ -43,6 +43,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.Handle("/api/", http.StripPrefix("/api", apiHandler))
+	mux.Handle("/api", apiHandler)
 	mux.Handle("/dashboard", dashHandler)
 	mux.Handle("/dashboard/", dashHandler)
 	mux.Handle("/", proxyHandler)

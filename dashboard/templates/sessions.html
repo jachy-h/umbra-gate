@@ -27,17 +27,18 @@ fetch('/api/sessions')
         const tbody = document.getElementById('sessionsBody');
         tbody.innerHTML = data.map(s => `
             <tr>
-                <td>${fmtTime(s.started_at)}</td>
-                <td>${s.provider_name}</td>
-                <td>${s.model}</td>
+                <td>${esc(fmtTime(s.started_at))}</td>
+                <td>${esc(s.provider_name)}</td>
+                <td>${esc(s.model)}</td>
                 <td>${s.prompt_tokens + s.completion_tokens}</td>
-                <td>${fmtDuration(s.duration_ms)}</td>
-                <td><span class="badge badge-${s.status}">${s.status}</span></td>
+                <td>${esc(fmtDuration(s.duration_ms))}</td>
+                <td><span class="badge badge-${esc(s.status)}">${esc(s.status)}</span></td>
                 <td><a href="/dashboard/sessions/${s.id}">View</a></td>
             </tr>
         `).join('');
     });
 
+function esc(s) { return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m]); }
 function fmtTime(t) { return new Date(t + 'Z').toLocaleString(); }
 function fmtDuration(ms) { return ms >= 1000 ? (ms/1000).toFixed(1)+'s' : ms+'ms'; }
 </script>

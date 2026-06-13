@@ -1,9 +1,13 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/anomalyco/llm-gateway/db"
 )
@@ -27,8 +31,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/models":
 		h.handleModels(w, r)
 	default:
-		if len(r.URL.Path) > 10 && r.URL.Path[:10] == "/sessions/" {
-			h.handleSessionDetail(w, r)
+		idStr := strings.TrimPrefix(r.URL.Path, "/sessions/")
+		if idStr != r.URL.Path {
+			h.handleSessionDetail(w, r, idStr)
 			return
 		}
 		http.NotFound(w, r)
@@ -41,17 +46,21 @@ func (h *Handler) handleStats(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return
 	}
-	json.NewEncoder(w).Encode(stats)
+	writeJSON(w, stats)
 }
 
 func (h *Handler) handleSessions(w http.ResponseWriter, r *http.Request) {
 	limit := 50
 	offset := 0
 	if l := r.URL.Query().Get("limit"); l != "" {
-		limit, _ = strconv.Atoi(l)
+		if v, err := strconv.Atoi(l); err == nil {
+			limit = v
+		}
 	}
 	if o := r.URL.Query().Get("offset"); o != "" {
-		offset, _ = strconv.Atoi(o)
+		if v, err := strconv.Atoi(o); err == nil {
+			offset = v
+		}
 	}
 
 	sessions, err := h.db.ListSessions(limit, offset)
@@ -62,11 +71,10 @@ func (h *Handler) handleSessions(w http.ResponseWriter, r *http.Request) {
 	if sessions == nil {
 		sessions = []db.Session{}
 	}
-	json.NewEncoder(w).Encode(sessions)
+	writeJSON(w, sessions)
 }
 
-func (h *Handler) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
-	idStr := r.URL.Path[10:]
+func (h *Handler) handleSessionDetail(w http.ResponseWriter, r *http.Request, idStr string) {
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
 		http.Error(w, `{"error":"invalid id"}`, http.StatusBadRequest)
@@ -74,11 +82,15 @@ func (h *Handler) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	session, err := h.db.GetSession(id)
-	if err != nil {
+	if errors.Is(err, sql.ErrNoRows) {
 		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
 		return
 	}
-	json.NewEncoder(w).Encode(session)
+	if err != nil {
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, session)
 }
 
 func (h *Handler) handleModels(w http.ResponseWriter, r *http.Request) {
@@ -90,5 +102,11 @@ func (h *Handler) handleModels(w http.ResponseWriter, r *http.Request) {
 	if stats == nil {
 		stats = []db.ModelStats{}
 	}
-	json.NewEncoder(w).Encode(stats)
+	writeJSON(w, stats)
+}
+
+func writeJSON(w http.ResponseWriter, v interface{}) {
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Error("failed to encode JSON response", "error", err)
+	}
 }

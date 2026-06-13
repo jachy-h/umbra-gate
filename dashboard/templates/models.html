@@ -23,12 +23,14 @@ fetch('/api/models')
     .then(data => {
         document.getElementById('modelsBody').innerHTML = data.map(m => `
             <tr>
-                <td>${m.model}</td>
+                <td>${esc(m.model)}</td>
                 <td>${m.request_count}</td>
                 <td>${m.total_tokens}</td>
                 <td>${(m.avg_duration_ms/1000).toFixed(1)}s</td>
             </tr>
         `).join('');
     });
+
+function esc(s) { return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m]); }
 </script>
 {{end}}
