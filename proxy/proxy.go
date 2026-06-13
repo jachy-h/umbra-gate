@@ -65,7 +65,3 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unknown protocol", http.StatusInternalServerError)
 	}
 }
-
-func (p *Proxy) handleAnthropic(w http.ResponseWriter, r *http.Request, providerName string, providerCfg *config.ProviderConfig, target *url.URL, path string) {
-	http.Error(w, "anthropic protocol not yet implemented", http.StatusNotImplemented)
-}
