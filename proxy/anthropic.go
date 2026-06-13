@@ -109,6 +109,17 @@ func (p *Proxy) proxyAnthropicNonStream(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
+	if resp.StatusCode != http.StatusOK {
+		errMsg := string(respBody)
+		p.db.CompleteSession(sessionID, 0, 0, time.Since(startTime).Milliseconds(), &errMsg)
+		for k, v := range resp.Header {
+			w.Header()[k] = v
+		}
+		w.WriteHeader(resp.StatusCode)
+		w.Write(respBody)
+		return
+	}
+
 	var antResp anthropicResponse
 	if err := json.Unmarshal(respBody, &antResp); err != nil {
 		slog.Warn("failed to parse upstream response", "error", err)

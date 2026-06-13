@@ -98,6 +98,17 @@ func (p *Proxy) proxyOpenAINonStream(w http.ResponseWriter, r *http.Request, pro
 		return
 	}
 
+	if resp.StatusCode != http.StatusOK {
+		errMsg := string(respBody)
+		p.db.CompleteSession(sessionID, 0, 0, time.Since(startTime).Milliseconds(), &errMsg)
+		for k, v := range resp.Header {
+			w.Header()[k] = v
+		}
+		w.WriteHeader(resp.StatusCode)
+		w.Write(respBody)
+		return
+	}
+
 	var oaiResp openAIResponse
 	if err := json.Unmarshal(respBody, &oaiResp); err != nil {
 		slog.Warn("failed to parse upstream response", "error", err)

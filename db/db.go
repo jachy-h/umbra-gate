@@ -20,6 +20,10 @@ func Open(path string) (*DB, error) {
 		conn.Close()
 		return nil, err
 	}
+	if _, err := conn.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		conn.Close()
+		return nil, err
+	}
 	if err := conn.Ping(); err != nil {
 		conn.Close()
 		return nil, err

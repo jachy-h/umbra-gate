@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
+	"time"
 
 	"github.com/anomalyco/llm-gateway/api"
 	"github.com/anomalyco/llm-gateway/config"
@@ -48,9 +52,28 @@ func main() {
 	mux.Handle("/dashboard/", dashHandler)
 	mux.Handle("/", proxyHandler)
 
-	slog.Info("starting server", "listen", cfg.Listen)
-	if err := http.ListenAndServe(cfg.Listen, mux); err != nil {
-		slog.Error("server error", "error", err)
-		os.Exit(1)
+	srv := &http.Server{
+		Addr:    cfg.Listen,
+		Handler: mux,
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	go func() {
+		slog.Info("starting server", "listen", cfg.Listen)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("server error", "error", err)
+			os.Exit(1)
+		}
+	}()
+
+	<-ctx.Done()
+	slog.Info("shutting down server")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		slog.Error("server shutdown error", "error", err)
 	}
 }

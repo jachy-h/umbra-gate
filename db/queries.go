@@ -61,11 +61,12 @@ func (d *DB) EnsureProvider(name string) (int64, error) {
 	if !errors.Is(err, sql.ErrNoRows) {
 		return 0, err
 	}
-	res, err := d.conn.Exec("INSERT INTO providers (name) VALUES (?)", name)
+	d.conn.Exec("INSERT OR IGNORE INTO providers (name) VALUES (?)", name)
+	err = d.conn.QueryRow("SELECT id FROM providers WHERE name = ?", name).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
-	return res.LastInsertId()
+	return id, nil
 }
 
 func (d *DB) CreateSession(providerID int64, model string) (int64, error) {
