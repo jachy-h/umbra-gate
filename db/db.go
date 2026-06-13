@@ -29,5 +29,6 @@ func (d *DB) Close() error {
 }
 
 func (d *DB) migrate() error {
+	// TODO: implement schema migrations
 	return nil
 }

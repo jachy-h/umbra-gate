@@ -1,0 +1,6 @@
+personal-ai-router
+router.db
+*.log
+.DS_Store
+.idea/
+.vscode/
