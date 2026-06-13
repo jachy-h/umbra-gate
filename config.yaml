@@ -1,0 +1,10 @@
+listen: "127.0.0.1:4141"
+
+providers:
+  volcengine:
+    base_url: https://ark.cn-beijing.volces.com/api/coding/v3
+    api_key: ""
+    protocol: openai-compatible
+
+storage:
+  save_prompt: false
