@@ -154,14 +154,23 @@ func (p *Proxy) proxyOpenAIStream(w http.ResponseWriter, r *http.Request, provid
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		errMsg := string(body)
+		body, readErr := io.ReadAll(resp.Body)
+		errMsg := "upstream returned non-200"
+		if readErr == nil {
+			errMsg = string(body)
+		}
 		p.db.CompleteSession(sessionID, 0, 0, time.Since(startTime).Milliseconds(), &errMsg)
+		for k, v := range resp.Header {
+			w.Header()[k] = v
+		}
 		w.WriteHeader(resp.StatusCode)
 		w.Write(body)
 		return
 	}
 
+	for k, v := range resp.Header {
+		w.Header()[k] = v
+	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -174,32 +183,45 @@ func (p *Proxy) proxyOpenAIStream(w http.ResponseWriter, r *http.Request, provid
 		return
 	}
 
+	const bufSize = 4096
 	var promptTokens, completionTokens int64
-	buf := make([]byte, 4096)
+	var leftover string
+	buf := make([]byte, bufSize)
 	for {
 		n, readErr := resp.Body.Read(buf)
 		if n > 0 {
-			w.Write(buf[:n])
+			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
+				break
+			}
 			flusher.Flush()
 
-			lines := strings.Split(string(buf[:n]), "\n")
-			for _, line := range lines {
+			data := leftover + string(buf[:n])
+			lines := strings.Split(data, "\n")
+			leftover = ""
+			for i, line := range lines {
 				line = strings.TrimSpace(line)
+				if i == len(lines)-1 && line != "" && !strings.HasSuffix(data, "\n") {
+					leftover = line
+					continue
+				}
 				if !strings.HasPrefix(line, "data: ") {
 					continue
 				}
-				data := strings.TrimPrefix(line, "data: ")
-				if data == "[DONE]" {
+				jsonData := strings.TrimPrefix(line, "data: ")
+				if jsonData == "[DONE]" {
 					continue
 				}
 				var chunk openAIStreamChunk
-				if err := json.Unmarshal([]byte(data), &chunk); err == nil && chunk.Usage != nil {
+				if err := json.Unmarshal([]byte(jsonData), &chunk); err == nil && chunk.Usage != nil {
 					promptTokens = int64(chunk.Usage.PromptTokens)
 					completionTokens = int64(chunk.Usage.CompletionTokens)
 				}
 			}
 		}
 		if readErr != nil {
+			if readErr != io.EOF {
+				slog.Error("stream read error", "error", readErr)
+			}
 			break
 		}
 	}
