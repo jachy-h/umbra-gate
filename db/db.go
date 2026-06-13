@@ -29,6 +29,64 @@ func (d *DB) Close() error {
 }
 
 func (d *DB) migrate() error {
-	// TODO: implement schema migrations
+	_, err := d.conn.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+		version INTEGER PRIMARY KEY,
+		applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+	)`)
+	if err != nil {
+		return err
+	}
+
+	var currentVersion int
+	err = d.conn.QueryRow("SELECT COALESCE(MAX(version), 0) FROM schema_migrations").Scan(&currentVersion)
+	if err != nil {
+		return err
+	}
+
+	migrations := []struct {
+		version int
+		sql     string
+	}{
+		{1, `CREATE TABLE IF NOT EXISTS providers (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL UNIQUE,
+			created_at TEXT NOT NULL DEFAULT (datetime('now'))
+		)`},
+		{2, `CREATE TABLE IF NOT EXISTS sessions (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			provider_id INTEGER NOT NULL REFERENCES providers(id),
+			model TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'pending',
+			started_at TEXT NOT NULL DEFAULT (datetime('now')),
+			ended_at TEXT,
+			prompt_tokens INTEGER DEFAULT 0,
+			completion_tokens INTEGER DEFAULT 0,
+			duration_ms INTEGER DEFAULT 0,
+			error_message TEXT
+		)`},
+		{3, `CREATE TABLE IF NOT EXISTS requests (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			session_id INTEGER NOT NULL REFERENCES sessions(id),
+			prompt_tokens INTEGER DEFAULT 0,
+			completion_tokens INTEGER DEFAULT 0,
+			duration_ms INTEGER DEFAULT 0,
+			error_message TEXT,
+			created_at TEXT NOT NULL DEFAULT (datetime('now'))
+		)`},
+	}
+
+	for _, m := range migrations {
+		if m.version > currentVersion {
+			_, err = d.conn.Exec(m.sql)
+			if err != nil {
+				return err
+			}
+			_, err = d.conn.Exec("INSERT INTO schema_migrations (version) VALUES (?)", m.version)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
 	return nil
 }
