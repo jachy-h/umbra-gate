@@ -1,6 +1,10 @@
 package db
 
-import "time"
+import (
+	"database/sql"
+	"errors"
+	"time"
+)
 
 type Provider struct {
 	ID        int64  `json:"id"`
@@ -54,6 +58,9 @@ func (d *DB) EnsureProvider(name string) (int64, error) {
 	if err == nil {
 		return id, nil
 	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return 0, err
+	}
 	res, err := d.conn.Exec("INSERT INTO providers (name) VALUES (?)", name)
 	if err != nil {
 		return 0, err
@@ -101,12 +108,24 @@ func (d *DB) GetStats() (*Stats, error) {
 	today := now.Format("2006-01-02")
 	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()).Format("2006-01-02")
 
-	d.conn.QueryRow("SELECT COUNT(*) FROM sessions WHERE date(started_at) = ?", today).Scan(&s.TodaySessions)
-	d.conn.QueryRow("SELECT COUNT(*) FROM sessions WHERE date(started_at) >= ?", monthStart).Scan(&s.MonthSessions)
-	d.conn.QueryRow("SELECT COUNT(*) FROM requests WHERE date(created_at) = ?", today).Scan(&s.TodayRequests)
-	d.conn.QueryRow("SELECT COUNT(*) FROM requests WHERE date(created_at) >= ?", monthStart).Scan(&s.MonthRequests)
-	d.conn.QueryRow("SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) FROM requests WHERE date(created_at) = ?", today).Scan(&s.TodayTokens)
-	d.conn.QueryRow("SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) FROM requests WHERE date(created_at) >= ?", monthStart).Scan(&s.MonthTokens)
+	if err := d.conn.QueryRow("SELECT COUNT(*) FROM sessions WHERE date(started_at) = ?", today).Scan(&s.TodaySessions); err != nil {
+		return nil, err
+	}
+	if err := d.conn.QueryRow("SELECT COUNT(*) FROM sessions WHERE date(started_at) >= ?", monthStart).Scan(&s.MonthSessions); err != nil {
+		return nil, err
+	}
+	if err := d.conn.QueryRow("SELECT COUNT(*) FROM requests WHERE date(created_at) = ?", today).Scan(&s.TodayRequests); err != nil {
+		return nil, err
+	}
+	if err := d.conn.QueryRow("SELECT COUNT(*) FROM requests WHERE date(created_at) >= ?", monthStart).Scan(&s.MonthRequests); err != nil {
+		return nil, err
+	}
+	if err := d.conn.QueryRow("SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) FROM requests WHERE date(created_at) = ?", today).Scan(&s.TodayTokens); err != nil {
+		return nil, err
+	}
+	if err := d.conn.QueryRow("SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) FROM requests WHERE date(created_at) >= ?", monthStart).Scan(&s.MonthTokens); err != nil {
+		return nil, err
+	}
 
 	return s, nil
 }
@@ -127,9 +146,14 @@ func (d *DB) ListSessions(limit, offset int) ([]Session, error) {
 	var sessions []Session
 	for rows.Next() {
 		var s Session
-		rows.Scan(&s.ID, &s.ProviderID, &s.ProviderName, &s.Model, &s.Status,
-			&s.StartedAt, &s.EndedAt, &s.PromptTokens, &s.CompletionTokens, &s.DurationMs, &s.ErrorMessage)
+		if err := rows.Scan(&s.ID, &s.ProviderID, &s.ProviderName, &s.Model, &s.Status,
+			&s.StartedAt, &s.EndedAt, &s.PromptTokens, &s.CompletionTokens, &s.DurationMs, &s.ErrorMessage); err != nil {
+			return nil, err
+		}
 		sessions = append(sessions, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return sessions, nil
 }
@@ -163,8 +187,13 @@ func (d *DB) GetModelStats() ([]ModelStats, error) {
 	var stats []ModelStats
 	for rows.Next() {
 		var s ModelStats
-		rows.Scan(&s.Model, &s.RequestCount, &s.TotalTokens, &s.AvgDurationMs)
+		if err := rows.Scan(&s.Model, &s.RequestCount, &s.TotalTokens, &s.AvgDurationMs); err != nil {
+			return nil, err
+		}
 		stats = append(stats, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return stats, nil
 }
