@@ -1,0 +1,44 @@
+{{define "content"}}
+<h1 style="margin-bottom:24px;font-size:24px;">Sessions</h1>
+
+<div class="card">
+    <table>
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Provider</th>
+                <th>Model</th>
+                <th>Tokens</th>
+                <th>Duration</th>
+                <th>Status</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody id="sessionsBody">
+            <tr><td colspan="7">Loading...</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<script>
+fetch('/api/sessions')
+    .then(r => r.json())
+    .then(data => {
+        const tbody = document.getElementById('sessionsBody');
+        tbody.innerHTML = data.map(s => `
+            <tr>
+                <td>${fmtTime(s.started_at)}</td>
+                <td>${s.provider_name}</td>
+                <td>${s.model}</td>
+                <td>${s.prompt_tokens + s.completion_tokens}</td>
+                <td>${fmtDuration(s.duration_ms)}</td>
+                <td><span class="badge badge-${s.status}">${s.status}</span></td>
+                <td><a href="/dashboard/sessions/${s.id}">View</a></td>
+            </tr>
+        `).join('');
+    });
+
+function fmtTime(t) { return new Date(t + 'Z').toLocaleString(); }
+function fmtDuration(ms) { return ms >= 1000 ? (ms/1000).toFixed(1)+'s' : ms+'ms'; }
+</script>
+{{end}}

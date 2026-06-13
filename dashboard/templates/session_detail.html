@@ -1,0 +1,30 @@
+{{define "content"}}
+<a href="/dashboard/sessions" class="back-link">← Back to Sessions</a>
+<h1 style="margin-bottom:24px;font-size:24px;">Session #<span id="sessionId"></span></h1>
+
+<div class="card">
+    <div class="detail-grid" id="detailGrid"></div>
+</div>
+
+<script>
+const id = window.location.pathname.split('/').pop();
+document.getElementById('sessionId').textContent = id;
+
+fetch('/api/sessions/' + id)
+    .then(r => r.json())
+    .then(s => {
+        document.getElementById('detailGrid').innerHTML = `
+            <div class="key">Provider</div><div class="val">${s.provider_name}</div>
+            <div class="key">Model</div><div class="val">${s.model}</div>
+            <div class="key">Status</div><div class="val"><span class="badge badge-${s.status}">${s.status}</span></div>
+            <div class="key">Started</div><div class="val">${new Date(s.started_at + 'Z').toLocaleString()}</div>
+            <div class="key">Ended</div><div class="val">${s.ended_at ? new Date(s.ended_at + 'Z').toLocaleString() : '-'}</div>
+            <div class="key">Prompt Tokens</div><div class="val">${s.prompt_tokens}</div>
+            <div class="key">Completion Tokens</div><div class="val">${s.completion_tokens}</div>
+            <div class="key">Total Tokens</div><div class="val">${s.prompt_tokens + s.completion_tokens}</div>
+            <div class="key">Duration</div><div class="val">${s.duration_ms >= 1000 ? (s.duration_ms/1000).toFixed(1)+'s' : s.duration_ms+'ms'}</div>
+            ${s.error_message ? '<div class="key">Error</div><div class="val" style="color:#c53030;">'+s.error_message+'</div>' : ''}
+        `;
+    });
+</script>
+{{end}}
