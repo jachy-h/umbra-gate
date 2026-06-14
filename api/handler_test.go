@@ -4,11 +4,26 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/anomalyco/llm-gateway/config"
 	"github.com/anomalyco/llm-gateway/db"
 )
+
+func newHandlerTestConfig(t *testing.T) *config.Config {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("providers: {}\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	return cfg
+}
 
 func TestProvidersEndpointReturnsProviderStats(t *testing.T) {
 	database, err := db.Open(filepath.Join(t.TempDir(), "router.db"))
@@ -29,7 +44,7 @@ func TestProvidersEndpointReturnsProviderStats(t *testing.T) {
 		t.Fatalf("CompleteSession() error = %v", err)
 	}
 
-	handler := New(database)
+	handler := New(database, newHandlerTestConfig(t))
 	req := httptest.NewRequest(http.MethodGet, "/providers", nil)
 	w := httptest.NewRecorder()
 
@@ -70,7 +85,7 @@ func TestTimeSeriesEndpointReturnsDailyStats(t *testing.T) {
 		t.Fatalf("CreateRequest() error = %v", err)
 	}
 
-	handler := New(database)
+	handler := New(database, newHandlerTestConfig(t))
 	req := httptest.NewRequest(http.MethodGet, "/timeseries?days=7", nil)
 	w := httptest.NewRecorder()
 

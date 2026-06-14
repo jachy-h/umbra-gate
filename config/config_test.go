@@ -26,8 +26,6 @@ providers:
     type: openai
     base_url: https://ark.example.com/v3/
     api_key: ${VOLC_KEY}
-storage:
-  save_prompt: true
 `)
 	cfg, err := Load(path)
 	if err != nil {
@@ -51,9 +49,6 @@ storage:
 	}
 	if p.APIKeyRaw != "${VOLC_KEY}" {
 		t.Errorf("api_key_raw = %q, want literal", p.APIKeyRaw)
-	}
-	if !cfg.Storage().SavePrompt {
-		t.Errorf("save_prompt should be true")
 	}
 }
 
@@ -104,23 +99,11 @@ providers:
 
 func TestLoadFailsOnMissingFields(t *testing.T) {
 	cases := map[string]string{
-		"missing type": `
-providers:
-  p1:
-    base_url: https://api.example.com
-    api_key: x
-`,
 		"missing base_url": `
 providers:
   p1:
     type: openai
     api_key: x
-`,
-		"missing api_key": `
-providers:
-  p1:
-    type: openai
-    base_url: https://api.example.com
 `,
 		"invalid base_url": `
 providers:
@@ -137,6 +120,32 @@ providers:
 				t.Fatalf("expected error for %s", name)
 			}
 		})
+	}
+}
+
+func TestLoadPassthroughDefaults(t *testing.T) {
+	// type and api_key are optional; defaults to passthrough with empty type.
+	path := writeTempConfig(t, `
+providers:
+  zen:
+    base_url: https://opencode.ai/zen/v1
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	p, ok := cfg.Provider("zen")
+	if !ok {
+		t.Fatalf("provider missing")
+	}
+	if p.Type != "" {
+		t.Errorf("type = %q, want empty (passthrough)", p.Type)
+	}
+	if p.BaseURL != "https://opencode.ai/zen/v1" {
+		t.Errorf("base_url = %q", p.BaseURL)
+	}
+	if p.APIKey != "" {
+		t.Errorf("api_key should be empty, got %q", p.APIKey)
 	}
 }
 
@@ -237,11 +246,9 @@ func TestUpsertProviderRejectsInvalid(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	cases := map[string]ProviderConfig{
-		"empty type":     {BaseURL: "https://x", APIKey: "k", APIKeyRaw: "k"},
 		"bad type":       {Type: "junk", BaseURL: "https://x", APIKey: "k", APIKeyRaw: "k"},
 		"empty base_url": {Type: ProviderTypeOpenAI, APIKey: "k", APIKeyRaw: "k"},
 		"bad base_url":   {Type: ProviderTypeOpenAI, BaseURL: "://x", APIKey: "k", APIKeyRaw: "k"},
-		"empty api_key":  {Type: ProviderTypeOpenAI, BaseURL: "https://x"},
 	}
 	for name, p := range cases {
 		t.Run(name, func(t *testing.T) {

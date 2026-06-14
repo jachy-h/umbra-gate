@@ -30,7 +30,7 @@ func newGatewayTestSetup(t *testing.T, yamlBody string) (*Handler, *config.Confi
 		t.Fatalf("db.Open: %v", err)
 	}
 	t.Cleanup(func() { database.Close() })
-	return NewWithConfig(database, cfg), cfg, configPath
+	return New(database, cfg), cfg, configPath
 }
 
 func TestGatewayProvidersList(t *testing.T) {
@@ -233,19 +233,4 @@ func TestGatewayProvidersDeleteNotFound(t *testing.T) {
 	}
 }
 
-func TestGatewayProvidersHandlerNilConfigSafe(t *testing.T) {
-	// When constructed via legacy New() without a config, the gateway routes return 404.
-	dir := t.TempDir()
-	database, err := db.Open(filepath.Join(dir, "router.db"))
-	if err != nil {
-		t.Fatalf("db: %v", err)
-	}
-	defer database.Close()
-	h := New(database)
-	req := httptest.NewRequest(http.MethodGet, "/gateway/providers", nil)
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	if w.Code != http.StatusNotFound {
-		t.Errorf("status = %d", w.Code)
-	}
-}
+

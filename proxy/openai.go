@@ -70,7 +70,9 @@ func (p *Proxy) buildOpenAIRequest(r *http.Request, providerCfg *config.Provider
 		return nil, err
 	}
 	copyForwardableHeaders(req.Header, r.Header)
-	req.Header.Set("Authorization", "Bearer "+providerCfg.APIKey)
+	if providerCfg.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+providerCfg.APIKey)
+	}
 	if req.Header.Get("Content-Type") == "" {
 		req.Header.Set("Content-Type", "application/json")
 	}

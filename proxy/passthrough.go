@@ -2,40 +2,16 @@ package proxy
 
 import (
 	"bytes"
-	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 
 	"github.com/anomalyco/llm-gateway/config"
 )
 
-const defaultAnthropicVersion = "2023-06-01"
-
-type anthropicUsage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
-}
-
-type anthropicResponse struct {
-	Model string         `json:"model"`
-	Usage anthropicUsage `json:"usage"`
-}
-
-type anthropicStreamEvent struct {
-	Type  string          `json:"type"`
-	Usage *anthropicUsage `json:"usage"`
-}
-
-type anthropicMessage struct {
-	Model  string `json:"model"`
-	Stream bool   `json:"stream,omitempty"`
-}
-
-func (p *Proxy) handleAnthropic(w http.ResponseWriter, r *http.Request, providerName string, providerCfg *config.ProviderConfig, upstream *url.URL) {
+func (p *Proxy) handlePassthrough(w http.ResponseWriter, r *http.Request, providerName string, providerCfg *config.ProviderConfig, upstream *url.URL) {
 	startTime := time.Now()
 
 	bodyBytes, err := io.ReadAll(io.LimitReader(r.Body, 10<<20))
@@ -46,15 +22,7 @@ func (p *Proxy) handleAnthropic(w http.ResponseWriter, r *http.Request, provider
 		return
 	}
 
-	var msg anthropicMessage
-	if err := json.Unmarshal(bodyBytes, &msg); err != nil {
-		slog.Warn("failed to parse anthropic request", "error", err)
-	}
-	model := msg.Model
-	if model == "" {
-		model = "unknown"
-	}
-
+	model := extractModel(bodyBytes)
 	slog.Info("request", "provider", providerName, "model", model, "path", upstream.Path)
 
 	providerID, err := p.db.EnsureProvider(providerName)
@@ -71,24 +39,24 @@ func (p *Proxy) handleAnthropic(w http.ResponseWriter, r *http.Request, provider
 		return
 	}
 
-	if msg.Stream {
-		p.proxyAnthropicStream(w, r, providerCfg, upstream, bodyBytes, sessionID, startTime)
+	if isStreamRequest(bodyBytes) {
+		p.proxyPassthroughStream(w, r, providerCfg, upstream, bodyBytes, sessionID, startTime)
 	} else {
-		p.proxyAnthropicNonStream(w, r, providerCfg, upstream, bodyBytes, sessionID, startTime)
+		p.proxyPassthroughNonStream(w, r, providerCfg, upstream, bodyBytes, sessionID, startTime)
 	}
 }
 
-func (p *Proxy) buildAnthropicRequest(r *http.Request, providerCfg *config.ProviderConfig, upstream *url.URL, bodyBytes []byte) (*http.Request, error) {
+func (p *Proxy) buildPassthroughRequest(r *http.Request, providerCfg *config.ProviderConfig, upstream *url.URL, bodyBytes []byte) (*http.Request, error) {
 	req, err := http.NewRequestWithContext(r.Context(), r.Method, upstream.String(), bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, err
 	}
-	copyForwardableHeaders(req.Header, r.Header)
+
+	// Passthrough: preserve all client headers including auth (Bearer / x-api-key).
+	// Only inject gateway-configured API key if explicitly set in config.
+	copyAllForwardableHeaders(req.Header, r.Header)
 	if providerCfg.APIKey != "" {
-		req.Header.Set("x-api-key", providerCfg.APIKey)
-	}
-	if req.Header.Get("anthropic-version") == "" {
-		req.Header.Set("anthropic-version", defaultAnthropicVersion)
+		req.Header.Set("Authorization", "Bearer "+providerCfg.APIKey)
 	}
 	if req.Header.Get("Content-Type") == "" {
 		req.Header.Set("Content-Type", "application/json")
@@ -96,8 +64,8 @@ func (p *Proxy) buildAnthropicRequest(r *http.Request, providerCfg *config.Provi
 	return req, nil
 }
 
-func (p *Proxy) proxyAnthropicNonStream(w http.ResponseWriter, r *http.Request, providerCfg *config.ProviderConfig, upstream *url.URL, bodyBytes []byte, sessionID int64, startTime time.Time) {
-	req, err := p.buildAnthropicRequest(r, providerCfg, upstream, bodyBytes)
+func (p *Proxy) proxyPassthroughNonStream(w http.ResponseWriter, r *http.Request, providerCfg *config.ProviderConfig, upstream *url.URL, bodyBytes []byte, sessionID int64, startTime time.Time) {
+	req, err := p.buildPassthroughRequest(r, providerCfg, upstream, bodyBytes)
 	if err != nil {
 		errMsg := err.Error()
 		p.db.CompleteSession(sessionID, 0, 0, 0, &errMsg)
@@ -134,25 +102,17 @@ func (p *Proxy) proxyAnthropicNonStream(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	var antResp anthropicResponse
-	if err := json.Unmarshal(respBody, &antResp); err != nil {
-		slog.Warn("failed to parse upstream response", "error", err)
-	}
-
 	durationMs := time.Since(startTime).Milliseconds()
-	promptTokens := int64(antResp.Usage.InputTokens)
-	completionTokens := int64(antResp.Usage.OutputTokens)
-
-	p.db.CompleteSession(sessionID, promptTokens, completionTokens, durationMs, nil)
-	p.db.CreateRequest(sessionID, promptTokens, completionTokens, durationMs, nil)
+	p.db.CompleteSession(sessionID, 0, 0, durationMs, nil)
+	p.db.CreateRequest(sessionID, 0, 0, durationMs, nil)
 
 	copyResponseHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
 	w.Write(respBody)
 }
 
-func (p *Proxy) proxyAnthropicStream(w http.ResponseWriter, r *http.Request, providerCfg *config.ProviderConfig, upstream *url.URL, bodyBytes []byte, sessionID int64, startTime time.Time) {
-	req, err := p.buildAnthropicRequest(r, providerCfg, upstream, bodyBytes)
+func (p *Proxy) proxyPassthroughStream(w http.ResponseWriter, r *http.Request, providerCfg *config.ProviderConfig, upstream *url.URL, bodyBytes []byte, sessionID int64, startTime time.Time) {
+	req, err := p.buildPassthroughRequest(r, providerCfg, upstream, bodyBytes)
 	if err != nil {
 		errMsg := err.Error()
 		p.db.CompleteSession(sessionID, 0, 0, 0, &errMsg)
@@ -198,8 +158,6 @@ func (p *Proxy) proxyAnthropicStream(w http.ResponseWriter, r *http.Request, pro
 	}
 
 	const bufSize = 4096
-	var inputTokens, outputTokens int64
-	var leftover string
 	buf := make([]byte, bufSize)
 	for {
 		n, readErr := resp.Body.Read(buf)
@@ -208,26 +166,6 @@ func (p *Proxy) proxyAnthropicStream(w http.ResponseWriter, r *http.Request, pro
 				break
 			}
 			flusher.Flush()
-
-			data := leftover + string(buf[:n])
-			lines := strings.Split(data, "\n")
-			leftover = ""
-			for i, line := range lines {
-				line = strings.TrimSpace(line)
-				if i == len(lines)-1 && line != "" && !strings.HasSuffix(data, "\n") {
-					leftover = line
-					continue
-				}
-				if !strings.HasPrefix(line, "data: ") {
-					continue
-				}
-				jsonData := strings.TrimPrefix(line, "data: ")
-				var event anthropicStreamEvent
-				if err := json.Unmarshal([]byte(jsonData), &event); err == nil && event.Usage != nil {
-					inputTokens = int64(event.Usage.InputTokens)
-					outputTokens = int64(event.Usage.OutputTokens)
-				}
-			}
 		}
 		if readErr != nil {
 			if readErr != io.EOF {
@@ -238,6 +176,25 @@ func (p *Proxy) proxyAnthropicStream(w http.ResponseWriter, r *http.Request, pro
 	}
 
 	durationMs := time.Since(startTime).Milliseconds()
-	p.db.CompleteSession(sessionID, inputTokens, outputTokens, durationMs, nil)
-	p.db.CreateRequest(sessionID, inputTokens, outputTokens, durationMs, nil)
+	p.db.CompleteSession(sessionID, 0, 0, durationMs, nil)
+	p.db.CreateRequest(sessionID, 0, 0, durationMs, nil)
+}
+
+// copyAllForwardableHeaders copies headers from the inbound request onto the
+// outbound upstream request, preserving auth headers (Authorization, X-Api-Key)
+// unlike copyForwardableHeaders which strips them for gateway-managed auth.
+func copyAllForwardableHeaders(dst, src http.Header) {
+	for key, values := range src {
+		canon := http.CanonicalHeaderKey(key)
+		if _, hop := hopByHopHeaders[canon]; hop {
+			continue
+		}
+		switch canon {
+		case "Host", "Content-Length":
+			continue
+		}
+		for _, v := range values {
+			dst.Add(canon, v)
+		}
+	}
 }

@@ -18,13 +18,8 @@ type Handler struct {
 	cfg *config.Config
 }
 
-func New(database *db.DB) *Handler {
-	return &Handler{db: database}
-}
-
-// NewWithConfig builds a handler that also exposes gateway provider
-// management endpoints backed by the supplied config.
-func NewWithConfig(database *db.DB, cfg *config.Config) *Handler {
+// New builds a handler with full gateway provider management.
+func New(database *db.DB, cfg *config.Config) *Handler {
 	return &Handler{db: database, cfg: cfg}
 }
 

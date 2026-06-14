@@ -61,8 +61,9 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case config.ProviderTypeAnthropic:
 		p.handleAnthropic(w, r, providerName, &providerCfg, upstream)
 	default:
-		slog.Warn("unknown provider type", "type", providerCfg.Type)
-		http.Error(w, "unknown provider type", http.StatusInternalServerError)
+		// Empty type or unrecognised → passthrough: forward request as-is
+		// without parsing the body for tokens; preserve client auth headers.
+		p.handlePassthrough(w, r, providerName, &providerCfg, upstream)
 	}
 }
 

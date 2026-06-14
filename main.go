@@ -42,8 +42,8 @@ func main() {
 	defer database.Close()
 
 	proxyHandler := proxy.New(cfg, database)
-	apiHandler := api.NewWithConfig(database, cfg)
-	dashHandler := dashboard.New(database)
+	apiHandler := api.New(database, cfg)
+	dashHandler := dashboard.New(database, cfg)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

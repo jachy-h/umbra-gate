@@ -23,6 +23,9 @@ const (
 )
 
 func (t ProviderType) Valid() bool {
+	if t == "" {
+		return true // passthrough (default when type omitted)
+	}
 	switch t {
 	case ProviderTypeOpenAI, ProviderTypeAnthropic:
 		return true
@@ -42,10 +45,6 @@ type ProviderConfig struct {
 	APIKeyRaw string
 }
 
-type StorageConfig struct {
-	SavePrompt bool
-}
-
 // Config is the validated, in-memory representation of config.yaml.
 //
 // Mutating methods (Upsert/Delete/Save) and read methods are safe to call
@@ -56,24 +55,18 @@ type Config struct {
 	path      string
 	listen    string
 	providers map[string]ProviderConfig
-	storage   StorageConfig
 }
 
 // rawConfig matches the YAML file layout exactly. Used only for (un)marshal.
 type rawConfig struct {
 	Listen    string                       `yaml:"listen,omitempty"`
 	Providers map[string]rawProviderConfig `yaml:"providers"`
-	Storage   rawStorageConfig             `yaml:"storage,omitempty"`
 }
 
 type rawProviderConfig struct {
 	Type    string `yaml:"type"`
 	BaseURL string `yaml:"base_url"`
 	APIKey  string `yaml:"api_key"`
-}
-
-type rawStorageConfig struct {
-	SavePrompt bool `yaml:"save_prompt,omitempty"`
 }
 
 const defaultListen = "127.0.0.1:4141"
@@ -91,7 +84,6 @@ func Load(path string) (*Config, error) {
 		path:      path,
 		listen:    raw.Listen,
 		providers: map[string]ProviderConfig{},
-		storage:   StorageConfig{SavePrompt: raw.Storage.SavePrompt},
 	}
 	if cfg.listen == "" {
 		cfg.listen = defaultListen
@@ -108,11 +100,8 @@ func Load(path string) (*Config, error) {
 
 func buildProvider(rp rawProviderConfig) (ProviderConfig, error) {
 	pt := ProviderType(strings.TrimSpace(rp.Type))
-	if pt == "" {
-		return ProviderConfig{}, errors.New("type is required")
-	}
 	if !pt.Valid() {
-		return ProviderConfig{}, fmt.Errorf("unknown type %q (must be openai or anthropic)", rp.Type)
+		return ProviderConfig{}, fmt.Errorf("unknown type %q (must be openai, anthropic, or empty for passthrough)", rp.Type)
 	}
 	baseURL := strings.TrimSpace(rp.BaseURL)
 	if baseURL == "" {
@@ -123,12 +112,13 @@ func buildProvider(rp rawProviderConfig) (ProviderConfig, error) {
 		return ProviderConfig{}, fmt.Errorf("base_url is not a valid absolute URL: %q", rp.BaseURL)
 	}
 	rawKey := strings.TrimSpace(rp.APIKey)
-	if rawKey == "" {
-		return ProviderConfig{}, errors.New("api_key is required")
-	}
-	resolved, err := expandEnv(rawKey)
-	if err != nil {
-		return ProviderConfig{}, err
+	var resolved string
+	if rawKey != "" {
+		var err error
+		resolved, err = expandEnv(rawKey)
+		if err != nil {
+			return ProviderConfig{}, err
+		}
 	}
 	return ProviderConfig{
 		Type:      pt,
@@ -170,12 +160,6 @@ func (c *Config) Listen() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.listen
-}
-
-func (c *Config) Storage() StorageConfig {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.storage
 }
 
 func (c *Config) Provider(id string) (ProviderConfig, bool) {
@@ -237,7 +221,6 @@ func (c *Config) Save() error {
 	raw := rawConfig{
 		Listen:    c.listen,
 		Providers: map[string]rawProviderConfig{},
-		Storage:   rawStorageConfig{SavePrompt: c.storage.SavePrompt},
 	}
 	for id, p := range c.providers {
 		raw.Providers[id] = rawProviderConfig{

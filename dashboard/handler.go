@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/anomalyco/llm-gateway/config"
 	"github.com/anomalyco/llm-gateway/db"
 	"github.com/anomalyco/llm-gateway/opencodeconfig"
 )
@@ -30,6 +31,7 @@ type Options struct {
 	OpencodeConfigPath  string
 	ProviderListCommand func() ([]byte, error)
 	GatewayBaseURL      string
+	GatewayConfig       *config.Config
 }
 
 type Handler struct {
@@ -38,13 +40,14 @@ type Handler struct {
 	opencode            opencodeconfig.Manager
 	providerListCommand func() ([]byte, error)
 	gatewayBaseURL      string
+	gatewayCfg          *config.Config
 }
 
-func New(database *db.DB) *Handler {
-	return NewWithOptions(database, Options{})
+func New(database *db.DB, gatewayCfg *config.Config) *Handler {
+	return newWithOptions(database, Options{GatewayConfig: gatewayCfg})
 }
 
-func NewWithOptions(database *db.DB, options Options) *Handler {
+func newWithOptions(database *db.DB, options Options) *Handler {
 	funcMap := template.FuncMap{
 		"formatNum": func(n int64) string {
 			if n >= 1000000 {
@@ -74,7 +77,7 @@ func NewWithOptions(database *db.DB, options Options) *Handler {
 	if gatewayBaseURL == "" {
 		gatewayBaseURL = "http://127.0.0.1:4141"
 	}
-	return &Handler{db: database, templates: templates, opencode: opencodeconfig.Manager{Path: options.OpencodeConfigPath}, providerListCommand: providerListCommand, gatewayBaseURL: gatewayBaseURL}
+	return &Handler{db: database, templates: templates, opencode: opencodeconfig.Manager{Path: options.OpencodeConfigPath}, providerListCommand: providerListCommand, gatewayBaseURL: gatewayBaseURL, gatewayCfg: options.GatewayConfig}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -263,6 +266,54 @@ func (h *Handler) providerApply(w http.ResponseWriter, r *http.Request) {
 	writeDashboardJSON(w, map[string]bool{"ok": true})
 }
 
+func (h *Handler) syncGatewayConfig(manager opencodeconfig.Manager, id string, enabled bool) {
+	if h.gatewayCfg == nil {
+		return
+	}
+	if !enabled {
+		_ = h.gatewayCfg.DeleteProvider(id)
+		_ = h.gatewayCfg.Save()
+		return
+	}
+	ocCfg, _, err := manager.Load()
+	if err != nil {
+		slog.Warn("failed to load opencode config for gateway sync", "error", err)
+		return
+	}
+	providers, _ := ocCfg["provider"].(map[string]any)
+	if providers == nil {
+		return
+	}
+	provider, _ := providers[id].(map[string]any)
+	if provider == nil {
+		return
+	}
+	options, _ := provider["options"].(map[string]any)
+	origBaseURL := ""
+	if options != nil {
+		if bu, ok := options["baseURL"].(string); ok {
+			origBaseURL = bu
+		}
+	}
+	if origBaseURL == "" || gatewayURLMatches(origBaseURL, h.gatewayBaseURL, id) {
+		if _, exists := h.gatewayCfg.Provider(id); exists {
+			return
+		}
+		slog.Warn("cannot determine upstream URL for gateway provider; add it to config.yaml manually", "provider", id)
+		return
+	}
+	if err := h.gatewayCfg.UpsertProvider(id, config.ProviderConfig{
+		Type:    "",
+		BaseURL: origBaseURL,
+	}); err != nil {
+		slog.Warn("failed to register gateway provider", "error", err)
+		return
+	}
+	if err := h.gatewayCfg.Save(); err != nil {
+		slog.Warn("failed to save gateway config", "error", err)
+	}
+}
+
 type gatewayToggleRequest struct {
 	ID      string `json:"id"`
 	Enabled bool   `json:"enabled"`
@@ -285,6 +336,7 @@ func (h *Handler) providerGateway(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	manager := h.managerForPath(input.Path)
+	h.syncGatewayConfig(manager, id, input.Enabled)
 	plan, err := manager.Plan(opencodeconfig.ProviderInput{ID: id})
 	if err != nil {
 		http.Error(w, `{"error":"failed to read opencode config"}`, http.StatusInternalServerError)

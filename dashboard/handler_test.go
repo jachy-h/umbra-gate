@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anomalyco/llm-gateway/config"
 	"github.com/anomalyco/llm-gateway/db"
 )
 
@@ -20,7 +21,7 @@ func TestHomeRendersIconStatsAndUsageBreakdowns(t *testing.T) {
 	}
 	defer database.Close()
 
-	handler := New(database)
+	handler := New(database, nil)
 	req := httptest.NewRequest(http.MethodGet, "/dashboard", nil)
 	w := httptest.NewRecorder()
 
@@ -55,7 +56,7 @@ func TestProvidersPageRendersManagementUI(t *testing.T) {
 		t.Fatalf("Open() error = %v", err)
 	}
 	defer database.Close()
-	handler := NewWithOptions(database, Options{OpencodeConfigPath: filepath.Join(t.TempDir(), "opencode.json")})
+	handler := newWithOptions(database, Options{OpencodeConfigPath: filepath.Join(t.TempDir(), "opencode.json")})
 
 	req := httptest.NewRequest(http.MethodGet, "/dashboard/providers", nil)
 	w := httptest.NewRecorder()
@@ -87,7 +88,7 @@ func TestProviderConfigUsesOpencodeProviderListOnly(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte(`{"provider":{"cmdonly":{"options":{"apiKey":"secret"}}}}`), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	handler := NewWithOptions(database, Options{
+	handler := newWithOptions(database, Options{
 		OpencodeConfigPath: configPath,
 		ProviderListCommand: func() ([]byte, error) {
 			return []byte(`[{"id":"cmdonly","name":"Command Only"},{"id":"other","name":"Other Provider"}]`), nil
@@ -124,7 +125,7 @@ func TestProviderConfigEndpointReturnsCatalogAndMaskedConfig(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte(`{"provider":{"openai":{"options":{"apiKey":"secret"}}}}`), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	handler := NewWithOptions(database, Options{OpencodeConfigPath: configPath, ProviderListCommand: func() ([]byte, error) {
+	handler := newWithOptions(database, Options{OpencodeConfigPath: configPath, ProviderListCommand: func() ([]byte, error) {
 		return []byte(`[{"id":"openai","name":"OpenAI"},{"id":"anthropic","name":"Anthropic"},{"id":"deepseek","name":"DeepSeek"},{"id":"glm","name":"GLM"},{"id":"kimi","name":"Kimi"}]`), nil
 	}})
 
@@ -157,7 +158,7 @@ func TestProviderDiffDoesNotWriteConfig(t *testing.T) {
 	if err := os.WriteFile(configPath, original, 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	handler := NewWithOptions(database, Options{OpencodeConfigPath: configPath})
+	handler := newWithOptions(database, Options{OpencodeConfigPath: configPath})
 	payload := []byte(`{"path":"` + configPath + `","id":"openai","api_key":"secret","models":["gpt-4o"],"default_model":"openai/gpt-4o"}`)
 
 	req := httptest.NewRequest(http.MethodPost, "/dashboard/providers/diff", bytes.NewReader(payload))
@@ -192,7 +193,7 @@ func TestProviderDiffCanEnableGatewayBaseURL(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte(`{"provider":{"openai":{"options":{"apiKey":"secret"}}}}`), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	handler := NewWithOptions(database, Options{OpencodeConfigPath: configPath, GatewayBaseURL: "http://127.0.0.1:4141"})
+	handler := newWithOptions(database, Options{OpencodeConfigPath: configPath, GatewayBaseURL: "http://127.0.0.1:4141"})
 	payload := []byte(`{"path":"` + configPath + `","id":"openai","gateway":"enable"}`)
 
 	req := httptest.NewRequest(http.MethodPost, "/dashboard/providers/diff", bytes.NewReader(payload))
@@ -217,7 +218,7 @@ func TestProviderApplyWritesWithChecksum(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte(`{"provider":{}}`), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	handler := NewWithOptions(database, Options{OpencodeConfigPath: configPath})
+	handler := newWithOptions(database, Options{OpencodeConfigPath: configPath})
 	payload := []byte(`{"path":"` + configPath + `","id":"openai","api_key":"secret"}`)
 	diffReq := httptest.NewRequest(http.MethodPost, "/dashboard/providers/diff", bytes.NewReader(payload))
 	diffW := httptest.NewRecorder()
@@ -253,10 +254,18 @@ func TestProviderGatewayTogglesAtomically(t *testing.T) {
 	}
 	defer database.Close()
 	configPath := filepath.Join(t.TempDir(), "opencode.json")
-	if err := os.WriteFile(configPath, []byte(`{"provider":{"openai":{"options":{"apiKey":"secret"}}}}`), 0o600); err != nil {
+	if err := os.WriteFile(configPath, []byte(`{"provider":{"openai":{"options":{"apiKey":"secret","baseURL":"https://api.openai.com/v1"}}}}`), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	handler := NewWithOptions(database, Options{OpencodeConfigPath: configPath, GatewayBaseURL: "http://127.0.0.1:4141"})
+	gatewayCfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(gatewayCfgPath, []byte("providers: {}\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	gatewayCfg, err := config.Load(gatewayCfgPath)
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+	handler := newWithOptions(database, Options{OpencodeConfigPath: configPath, GatewayBaseURL: "http://127.0.0.1:4141", GatewayConfig: gatewayCfg})
 
 	enableReq := httptest.NewRequest(http.MethodPost, "/dashboard/providers/gateway", bytes.NewReader([]byte(`{"path":"`+configPath+`","id":"openai","enabled":true}`)))
 	enableW := httptest.NewRecorder()
@@ -270,6 +279,9 @@ func TestProviderGatewayTogglesAtomically(t *testing.T) {
 	}
 	if !strings.Contains(string(written), "\"baseURL\": \"http://127.0.0.1:4141/openai\"") {
 		t.Fatalf("baseURL not set after enable: %s", string(written))
+	}
+	if _, ok := gatewayCfg.Provider("openai"); !ok {
+		t.Fatal("gateway config.yaml missing provider after enable")
 	}
 
 	disableReq := httptest.NewRequest(http.MethodPost, "/dashboard/providers/gateway", bytes.NewReader([]byte(`{"path":"`+configPath+`","id":"openai","enabled":false}`)))
@@ -285,6 +297,9 @@ func TestProviderGatewayTogglesAtomically(t *testing.T) {
 	if strings.Contains(string(written2), "127.0.0.1:4141") {
 		t.Fatalf("baseURL not removed after disable: %s", string(written2))
 	}
+	if _, ok := gatewayCfg.Provider("openai"); ok {
+		t.Fatal("gateway config.yaml should not have provider after disable")
+	}
 }
 
 func TestProviderGatewayRejectsMissingID(t *testing.T) {
@@ -293,7 +308,7 @@ func TestProviderGatewayRejectsMissingID(t *testing.T) {
 		t.Fatalf("Open() error = %v", err)
 	}
 	defer database.Close()
-	handler := NewWithOptions(database, Options{OpencodeConfigPath: filepath.Join(t.TempDir(), "opencode.json")})
+	handler := newWithOptions(database, Options{OpencodeConfigPath: filepath.Join(t.TempDir(), "opencode.json")})
 
 	req := httptest.NewRequest(http.MethodPost, "/dashboard/providers/gateway", bytes.NewReader([]byte(`{"enabled":true}`)))
 	w := httptest.NewRecorder()

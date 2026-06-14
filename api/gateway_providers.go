@@ -30,10 +30,6 @@ type gatewayProviderInput struct {
 }
 
 func (h *Handler) handleGatewayProviders(w http.ResponseWriter, r *http.Request) {
-	if h.cfg == nil {
-		http.NotFound(w, r)
-		return
-	}
 	rest := strings.TrimPrefix(r.URL.Path, "/gateway/providers")
 	rest = strings.TrimPrefix(rest, "/")
 
