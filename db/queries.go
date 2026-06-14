@@ -59,6 +59,12 @@ type ProviderStats struct {
 	AvgDurationMs float64 `json:"avg_duration_ms"`
 }
 
+type TimeSeriesStats struct {
+	Date         string `json:"date"`
+	RequestCount int64  `json:"request_count"`
+	TotalTokens  int64  `json:"total_tokens"`
+}
+
 func (d *DB) EnsureProvider(name string) (int64, error) {
 	var id int64
 	err := d.conn.QueryRow("SELECT id FROM providers WHERE name = ?", name).Scan(&id)
@@ -229,6 +235,54 @@ func (d *DB) GetProviderStats() ([]ProviderStats, error) {
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+	return stats, nil
+}
+
+func (d *DB) GetTimeSeriesStats(days int) ([]TimeSeriesStats, error) {
+	if days <= 0 {
+		days = 7
+	}
+	if days > 90 {
+		days = 90
+	}
+
+	today := time.Now()
+	start := today.AddDate(0, 0, -(days - 1))
+	byDate := make(map[string]TimeSeriesStats, days)
+	stats := make([]TimeSeriesStats, 0, days)
+	for i := 0; i < days; i++ {
+		date := start.AddDate(0, 0, i).Format("2006-01-02")
+		stat := TimeSeriesStats{Date: date}
+		byDate[date] = stat
+		stats = append(stats, stat)
+	}
+
+	rows, err := d.conn.Query(
+		`SELECT date(created_at), COUNT(*) as cnt, COALESCE(SUM(prompt_tokens + completion_tokens), 0) as total_tokens
+		 FROM requests
+		 WHERE date(created_at) >= ?
+		 GROUP BY date(created_at)
+		 ORDER BY date(created_at) ASC`, start.Format("2006-01-02"),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var stat TimeSeriesStats
+		if err := rows.Scan(&stat.Date, &stat.RequestCount, &stat.TotalTokens); err != nil {
+			return nil, err
+		}
+		byDate[stat.Date] = stat
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	for i := range stats {
+		stats[i] = byDate[stats[i].Date]
 	}
 	return stats, nil
 }

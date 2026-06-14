@@ -32,6 +32,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleModels(w, r)
 	case "/providers":
 		h.handleProviders(w, r)
+	case "/timeseries":
+		h.handleTimeSeries(w, r)
 	default:
 		idStr := strings.TrimPrefix(r.URL.Path, "/sessions/")
 		if idStr != r.URL.Path {
@@ -115,6 +117,24 @@ func (h *Handler) handleProviders(w http.ResponseWriter, r *http.Request) {
 	}
 	if stats == nil {
 		stats = []db.ProviderStats{}
+	}
+	writeJSON(w, stats)
+}
+
+func (h *Handler) handleTimeSeries(w http.ResponseWriter, r *http.Request) {
+	days := 7
+	if raw := r.URL.Query().Get("days"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			days = parsed
+		}
+	}
+	stats, err := h.db.GetTimeSeriesStats(days)
+	if err != nil {
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
+	}
+	if stats == nil {
+		stats = []db.TimeSeriesStats{}
 	}
 	writeJSON(w, stats)
 }

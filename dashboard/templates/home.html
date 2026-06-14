@@ -1,65 +1,108 @@
 {{define "content"}}
-<h1 class="page-title">Dashboard</h1>
+<h1 class="page-title" data-i18n="dashboard">Dashboard</h1>
 
 <div class="stats">
     <div class="stat">
         <div class="icon">⇄</div>
         <div>
-            <div class="label">Today Requests</div>
+            <div class="label" data-i18n="todayRequests">Today Requests</div>
             <div class="value">{{.Stats.TodayRequests}}</div>
         </div>
     </div>
     <div class="stat">
         <div class="icon">↻</div>
         <div>
-            <div class="label">Month Requests</div>
+            <div class="label" data-i18n="monthRequests">Month Requests</div>
             <div class="value">{{.Stats.MonthRequests}}</div>
         </div>
     </div>
     <div class="stat">
         <div class="icon">◈</div>
         <div>
-            <div class="label">Today Tokens</div>
+            <div class="label" data-i18n="todayTokens">Today Tokens</div>
             <div class="value">{{formatNum .Stats.TodayTokens}}</div>
         </div>
     </div>
     <div class="stat">
         <div class="icon">◆</div>
         <div>
-            <div class="label">Month Tokens</div>
+            <div class="label" data-i18n="monthTokens">Month Tokens</div>
             <div class="value">{{formatNum .Stats.MonthTokens}}</div>
         </div>
     </div>
 </div>
 
+<div class="card trend-card">
+    <h2 data-i18n="last7Days">Last 7 Days</h2>
+    <div class="chart-container"><canvas id="usageTrendChart"></canvas></div>
+    <div id="trendState" class="empty-state"></div>
+</div>
+
 <div class="dashboard-grid">
     <div class="card">
-        <h2>Tokens by Provider</h2>
-        <div id="providersUsage" class="usage-list"><div class="empty-state">Loading...</div></div>
+        <h2 data-i18n="tokensByProvider">Tokens by Provider</h2>
+        <div id="providersUsage" class="usage-list"><div class="empty-state" data-i18n="loading">Loading...</div></div>
     </div>
     <div class="card">
-        <h2>Tokens by Model</h2>
-        <div id="modelsUsage" class="usage-list"><div class="empty-state">Loading...</div></div>
+        <h2 data-i18n="tokensByModel">Tokens by Model</h2>
+        <div id="modelsUsage" class="usage-list"><div class="empty-state" data-i18n="loading">Loading...</div></div>
     </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
+const translations = {
+    en: {
+        home: 'Home', sessions: 'Sessions', models: 'Models', dashboard: 'Dashboard', todayRequests: 'Today Requests', monthRequests: 'Month Requests', todayTokens: 'Today Tokens', monthTokens: 'Month Tokens', last7Days: 'Last 7 Days', tokensByProvider: 'Tokens by Provider', tokensByModel: 'Tokens by Model', loading: 'Loading...', failedToLoadUsage: 'Failed to load usage', noUsageYet: 'No usage yet', tokens: 'tokens', requests: 'Requests', chartUnavailable: 'Chart library failed to load', switchLang: '中文'
+    },
+    zh: {
+        home: '首页', sessions: '会话', models: '模型', dashboard: '仪表盘', todayRequests: '今日请求', monthRequests: '本月请求', todayTokens: '今日 Tokens', monthTokens: '本月 Tokens', last7Days: '最近 7 天', tokensByProvider: '按 Provider 统计 Tokens', tokensByModel: '按模型统计 Tokens', loading: '加载中...', failedToLoadUsage: '加载用量失败', noUsageYet: '暂无用量', tokens: 'tokens', requests: '请求数', chartUnavailable: '图表库加载失败', switchLang: 'EN'
+    }
+};
+let usageTrendChart;
+
+applyTranslations();
+document.getElementById('languageToggle').addEventListener('click', () => setLang(getLang() === 'en' ? 'zh' : 'en'));
 loadUsage('/api/providers', 'providersUsage', item => item.provider_name);
 loadUsage('/api/models', 'modelsUsage', item => item.model);
+loadTrend();
+
+function getLang() {
+    const lang = localStorage.getItem('dashboard_lang');
+    return lang === 'zh' ? 'zh' : 'en';
+}
+
+function setLang(lang) {
+    localStorage.setItem('dashboard_lang', lang);
+    applyTranslations();
+    loadTrend();
+}
+
+function t(key) {
+    return translations[getLang()][key] || translations.en[key] || key;
+}
+
+function applyTranslations() {
+    document.documentElement.lang = getLang();
+    document.querySelectorAll('[data-i18n]').forEach(el => {
+        el.textContent = t(el.dataset.i18n);
+    });
+    document.getElementById('languageToggle').textContent = t('switchLang');
+}
 
 function loadUsage(url, elementId, labelFor) {
     fetch(url)
         .then(r => r.ok ? r.json() : Promise.reject(new Error('request failed')))
         .then(data => renderUsage(elementId, data, labelFor))
         .catch(() => {
-            document.getElementById(elementId).innerHTML = '<div class="empty-state">Failed to load usage</div>';
+            document.getElementById(elementId).innerHTML = `<div class="empty-state">${t('failedToLoadUsage')}</div>`;
         });
 }
 
 function renderUsage(elementId, data, labelFor) {
     const el = document.getElementById(elementId);
     if (!Array.isArray(data) || data.length === 0) {
-        el.innerHTML = '<div class="empty-state">No usage yet</div>';
+        el.innerHTML = `<div class="empty-state">${t('noUsageYet')}</div>`;
         return;
     }
 
@@ -72,12 +115,54 @@ function renderUsage(elementId, data, labelFor) {
             <div class="usage-row">
                 <div class="usage-meta">
                     <span class="usage-name">${esc(labelFor(item))}</span>
-                    <span class="usage-value">${formatNum(tokens)} tokens</span>
+                    <span class="usage-value">${formatNum(tokens)} ${t('tokens')}</span>
                 </div>
                 <div class="usage-bar"><div class="usage-fill" style="width:${width}%"></div></div>
             </div>
         `;
     }).join('');
+}
+
+function loadTrend() {
+    const state = document.getElementById('trendState');
+    state.textContent = '';
+    if (!window.Chart) {
+        state.textContent = t('chartUnavailable');
+        return;
+    }
+    fetch('/api/timeseries?days=7')
+        .then(r => r.ok ? r.json() : Promise.reject(new Error('request failed')))
+        .then(renderTrend)
+        .catch(() => {
+            state.textContent = t('failedToLoadUsage');
+        });
+}
+
+function renderTrend(data) {
+    if (!Array.isArray(data) || data.length === 0) {
+        document.getElementById('trendState').textContent = t('noUsageYet');
+        return;
+    }
+    const ctx = document.getElementById('usageTrendChart').getContext('2d');
+    if (usageTrendChart) usageTrendChart.destroy();
+    usageTrendChart = new Chart(ctx, {
+        data: {
+            labels: data.map(item => item.date),
+            datasets: [
+                { type: 'bar', label: t('requests'), data: data.map(item => item.request_count), backgroundColor: 'rgba(79, 70, 229, 0.25)', borderColor: '#4f46e5', yAxisID: 'requests' },
+                { type: 'line', label: 'Tokens', data: data.map(item => item.total_tokens), borderColor: '#06b6d4', backgroundColor: 'rgba(6, 182, 212, 0.12)', tension: 0.35, yAxisID: 'tokens' }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            scales: {
+                tokens: { type: 'linear', position: 'left', beginAtZero: true },
+                requests: { type: 'linear', position: 'right', beginAtZero: true, grid: { drawOnChartArea: false } }
+            }
+        }
+    });
 }
 
 function formatNum(n) {

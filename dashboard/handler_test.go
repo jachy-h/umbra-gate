@@ -35,6 +35,10 @@ func TestHomeRendersIconStatsAndUsageBreakdowns(t *testing.T) {
 		"/api/providers",
 		"/api/models",
 		"No usage yet",
+		"cdn.jsdelivr.net/npm/chart.js",
+		`id="usageTrendChart"`,
+		`id="languageToggle"`,
+		`data-i18n="dashboard"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("home body does not contain %q", want)
