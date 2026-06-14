@@ -1,7 +1,25 @@
+# Binaries
 personal-ai-router
+*.exe
+*.out
+*.test
+
+# Local config
+config.yaml
+
+# Database
 router.db
+router.db-*
+*.db
+*.db-*
+
+# Logs
 *.log
+
+# OS and editors
 .DS_Store
 .idea/
 .vscode/
+
+# Local worktrees
 .worktrees/
