@@ -42,7 +42,7 @@ func main() {
 	defer database.Close()
 
 	proxyHandler := proxy.New(cfg, database)
-	apiHandler := api.New(database)
+	apiHandler := api.NewWithConfig(database, cfg)
 	dashHandler := dashboard.New(database)
 
 	mux := http.NewServeMux()
@@ -59,7 +59,7 @@ func main() {
 	mux.Handle("/dashboard/", dashHandler)
 
 	srv := &http.Server{
-		Addr:    cfg.Listen,
+		Addr:    cfg.Listen(),
 		Handler: mux,
 	}
 
@@ -67,7 +67,7 @@ func main() {
 	defer stop()
 
 	go func() {
-		slog.Info("starting server", "listen", cfg.Listen)
+		slog.Info("starting server", "listen", cfg.Listen(), "providers", cfg.ProviderIDs())
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server error", "error", err)
 			os.Exit(1)

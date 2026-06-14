@@ -25,12 +25,17 @@ fetch('/api/models')
             <tr>
                 <td>${esc(m.model)}</td>
                 <td>${m.request_count}</td>
-                <td>${m.total_tokens}</td>
+                <td>${formatNum(m.total_tokens)}</td>
                 <td>${(m.avg_duration_ms/1000).toFixed(1)}s</td>
             </tr>
         `).join('');
     });
 
 function esc(s) { return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m]); }
+function formatNum(n) {
+    if (n >= 1000000) return ((n / 1000000).toFixed(1) + 'M').replace('.0', '');
+    if (n >= 1000) return ((n / 1000).toFixed(1) + 'K').replace('.0', '');
+    return String(n);
+}
 </script>
 {{end}}

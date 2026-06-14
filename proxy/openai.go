@@ -29,7 +29,7 @@ type openAIStreamChunk struct {
 	Usage *openAIUsage `json:"usage"`
 }
 
-func (p *Proxy) handleOpenAI(w http.ResponseWriter, r *http.Request, providerName string, providerCfg *config.ProviderConfig, target *url.URL, path string) {
+func (p *Proxy) handleOpenAI(w http.ResponseWriter, r *http.Request, providerName string, providerCfg *config.ProviderConfig, upstream *url.URL) {
 	startTime := time.Now()
 
 	bodyBytes, err := io.ReadAll(io.LimitReader(r.Body, 10<<20))
@@ -41,7 +41,7 @@ func (p *Proxy) handleOpenAI(w http.ResponseWriter, r *http.Request, providerNam
 	}
 
 	model := extractModel(bodyBytes)
-	slog.Info("request", "provider", providerName, "model", model, "path", path)
+	slog.Info("request", "provider", providerName, "model", model, "path", upstream.Path)
 
 	providerID, err := p.db.EnsureProvider(providerName)
 	if err != nil {
@@ -57,18 +57,28 @@ func (p *Proxy) handleOpenAI(w http.ResponseWriter, r *http.Request, providerNam
 		return
 	}
 
-	isStreaming := isStreamRequest(bodyBytes)
-
-	if isStreaming {
-		p.proxyOpenAIStream(w, r, providerCfg, target, path, bodyBytes, sessionID, startTime)
+	if isStreamRequest(bodyBytes) {
+		p.proxyOpenAIStream(w, r, providerCfg, upstream, bodyBytes, sessionID, startTime)
 	} else {
-		p.proxyOpenAINonStream(w, r, providerCfg, target, path, bodyBytes, sessionID, startTime)
+		p.proxyOpenAINonStream(w, r, providerCfg, upstream, bodyBytes, sessionID, startTime)
 	}
 }
 
-func (p *Proxy) proxyOpenAINonStream(w http.ResponseWriter, r *http.Request, providerCfg *config.ProviderConfig, target *url.URL, path string, bodyBytes []byte, sessionID int64, startTime time.Time) {
-	upstreamURL := target.String() + path
-	req, err := http.NewRequestWithContext(r.Context(), "POST", upstreamURL, bytes.NewReader(bodyBytes))
+func (p *Proxy) buildOpenAIRequest(r *http.Request, providerCfg *config.ProviderConfig, upstream *url.URL, bodyBytes []byte) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(r.Context(), r.Method, upstream.String(), bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, err
+	}
+	copyForwardableHeaders(req.Header, r.Header)
+	req.Header.Set("Authorization", "Bearer "+providerCfg.APIKey)
+	if req.Header.Get("Content-Type") == "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	return req, nil
+}
+
+func (p *Proxy) proxyOpenAINonStream(w http.ResponseWriter, r *http.Request, providerCfg *config.ProviderConfig, upstream *url.URL, bodyBytes []byte, sessionID int64, startTime time.Time) {
+	req, err := p.buildOpenAIRequest(r, providerCfg, upstream, bodyBytes)
 	if err != nil {
 		errMsg := err.Error()
 		p.db.CompleteSession(sessionID, 0, 0, 0, &errMsg)
@@ -76,8 +86,6 @@ func (p *Proxy) proxyOpenAINonStream(w http.ResponseWriter, r *http.Request, pro
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+providerCfg.APIKey)
 
 	resp, err := p.client.Do(req)
 	if err != nil {
@@ -101,9 +109,7 @@ func (p *Proxy) proxyOpenAINonStream(w http.ResponseWriter, r *http.Request, pro
 	if resp.StatusCode != http.StatusOK {
 		errMsg := string(respBody)
 		p.db.CompleteSession(sessionID, 0, 0, time.Since(startTime).Milliseconds(), &errMsg)
-		for k, v := range resp.Header {
-			w.Header()[k] = v
-		}
+		copyResponseHeaders(w.Header(), resp.Header)
 		w.WriteHeader(resp.StatusCode)
 		w.Write(respBody)
 		return
@@ -121,9 +127,7 @@ func (p *Proxy) proxyOpenAINonStream(w http.ResponseWriter, r *http.Request, pro
 	p.db.CompleteSession(sessionID, promptTokens, completionTokens, durationMs, nil)
 	p.db.CreateRequest(sessionID, promptTokens, completionTokens, durationMs, nil)
 
-	for k, v := range resp.Header {
-		w.Header()[k] = v
-	}
+	copyResponseHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
 	w.Write(respBody)
 }
@@ -141,9 +145,8 @@ func extractModel(body []byte) string {
 	return req.Model
 }
 
-func (p *Proxy) proxyOpenAIStream(w http.ResponseWriter, r *http.Request, providerCfg *config.ProviderConfig, target *url.URL, path string, bodyBytes []byte, sessionID int64, startTime time.Time) {
-	upstreamURL := target.String() + path
-	req, err := http.NewRequestWithContext(r.Context(), "POST", upstreamURL, bytes.NewReader(bodyBytes))
+func (p *Proxy) proxyOpenAIStream(w http.ResponseWriter, r *http.Request, providerCfg *config.ProviderConfig, upstream *url.URL, bodyBytes []byte, sessionID int64, startTime time.Time) {
+	req, err := p.buildOpenAIRequest(r, providerCfg, upstream, bodyBytes)
 	if err != nil {
 		errMsg := err.Error()
 		p.db.CompleteSession(sessionID, 0, 0, 0, &errMsg)
@@ -151,8 +154,6 @@ func (p *Proxy) proxyOpenAIStream(w http.ResponseWriter, r *http.Request, provid
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+providerCfg.APIKey)
 
 	resp, err := p.client.Do(req)
 	if err != nil {
@@ -171,17 +172,13 @@ func (p *Proxy) proxyOpenAIStream(w http.ResponseWriter, r *http.Request, provid
 			errMsg = string(body)
 		}
 		p.db.CompleteSession(sessionID, 0, 0, time.Since(startTime).Milliseconds(), &errMsg)
-		for k, v := range resp.Header {
-			w.Header()[k] = v
-		}
+		copyResponseHeaders(w.Header(), resp.Header)
 		w.WriteHeader(resp.StatusCode)
 		w.Write(body)
 		return
 	}
 
-	for k, v := range resp.Header {
-		w.Header()[k] = v
-	}
+	copyResponseHeaders(w.Header(), resp.Header)
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")

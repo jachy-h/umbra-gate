@@ -4,15 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Personal AI Router</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.classless.min.css">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { padding: 0; margin: 0; max-width: none; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #333; }
         nav { background: #1a1a2e; color: white; padding: 0 24px; display: flex; align-items: center; height: 56px; }
         nav a { color: #a0a0c0; text-decoration: none; margin-right: 24px; font-size: 14px; }
         nav a:hover, nav a.active { color: white; }
         nav .brand { font-weight: 700; font-size: 16px; color: white; margin-right: 32px; }
         .nav-spacer { flex: 1; }
-        .lang-toggle { border: 1px solid #4b5563; background: transparent; color: white; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 13px; }
+        .lang-toggle { border: 1px solid #4b5563; background: transparent; color: white; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 13px; width: auto; }
         .lang-toggle:hover { background: rgba(255,255,255,0.08); }
         main { max-width: 1120px; margin: 32px auto; padding: 0 24px; }
         .page-title { margin-bottom: 24px; font-size: 28px; color: #111827; }
@@ -33,8 +35,8 @@
         .usage-bar { height: 10px; background: #eef2ff; border-radius: 999px; overflow: hidden; }
         .usage-fill { height: 100%; background: linear-gradient(90deg, #4f46e5, #06b6d4); border-radius: inherit; }
         .empty-state { color: #6b7280; font-size: 14px; padding: 16px 0; }
-        table { width: 100%; border-collapse: collapse; }
-        th, td { text-align: left; padding: 12px 16px; border-bottom: 1px solid #eee; font-size: 14px; }
+        table { width: 100%; border-collapse: collapse; margin: 0; }
+        th, td { text-align: left; padding: 12px 16px; border-bottom: 1px solid #eee; font-size: 14px; background: transparent; --pico-table-row-stripped-background-color: transparent; }
         th { color: #888; font-weight: 600; font-size: 12px; text-transform: uppercase; }
         tr:hover { background: #fafafa; }
         .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
@@ -47,6 +49,7 @@
         .detail-grid { display: grid; grid-template-columns: 150px 1fr; gap: 8px 16px; }
         .detail-grid .key { color: #888; font-size: 14px; }
         .detail-grid .val { font-size: 14px; font-weight: 500; }
+        code { background: #f3f4f6; padding: 2px 6px; border-radius: 4px; }
     </style>
 </head>
 <body>
@@ -55,6 +58,7 @@
         <a href="/dashboard" class="{{if eq .Active "home"}}active{{end}}" data-i18n="home">Home</a>
         <a href="/dashboard/sessions" class="{{if eq .Active "sessions"}}active{{end}}" data-i18n="sessions">Sessions</a>
         <a href="/dashboard/models" class="{{if eq .Active "models"}}active{{end}}" data-i18n="models">Models</a>
+        <a href="/dashboard/providers" class="{{if eq .Active "providers"}}active{{end}}">Providers</a>
         <span class="nav-spacer"></span>
         <button id="languageToggle" class="lang-toggle" type="button">中文</button>
     </nav>

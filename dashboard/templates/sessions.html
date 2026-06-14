@@ -30,7 +30,7 @@ fetch('/api/sessions')
                 <td>${esc(fmtTime(s.started_at))}</td>
                 <td>${esc(s.provider_name)}</td>
                 <td>${esc(s.model)}</td>
-                <td>${s.prompt_tokens + s.completion_tokens}</td>
+                <td>${formatNum(s.prompt_tokens + s.completion_tokens)}</td>
                 <td>${esc(fmtDuration(s.duration_ms))}</td>
                 <td><span class="badge badge-${esc(s.status)}">${esc(s.status)}</span></td>
                 <td><a href="/dashboard/sessions/${s.id}">View</a></td>
@@ -41,5 +41,6 @@ fetch('/api/sessions')
 function esc(s) { return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m]); }
 function fmtTime(t) { return new Date(t + 'Z').toLocaleString(); }
 function fmtDuration(ms) { return ms >= 1000 ? (ms/1000).toFixed(1)+'s' : ms+'ms'; }
+function formatNum(n) { if (n >= 1000000) return ((n/1000000).toFixed(1)+'M').replace('.0',''); if (n >= 1000) return ((n/1000).toFixed(1)+'K').replace('.0',''); return String(n); }
 </script>
 {{end}}

@@ -9,18 +9,31 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/anomalyco/llm-gateway/config"
 	"github.com/anomalyco/llm-gateway/db"
 )
 
 type Handler struct {
-	db *db.DB
+	db  *db.DB
+	cfg *config.Config
 }
 
 func New(database *db.DB) *Handler {
 	return &Handler{db: database}
 }
 
+// NewWithConfig builds a handler that also exposes gateway provider
+// management endpoints backed by the supplied config.
+func NewWithConfig(database *db.DB, cfg *config.Config) *Handler {
+	return &Handler{db: database, cfg: cfg}
+}
+
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/gateway/providers") {
+		w.Header().Set("Content-Type", "application/json")
+		h.handleGatewayProviders(w, r)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 
 	switch r.URL.Path {

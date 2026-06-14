@@ -19,14 +19,15 @@ fetch('/api/sessions/' + id)
             <div class="key">Status</div><div class="val"><span class="badge badge-${esc(s.status)}">${esc(s.status)}</span></div>
             <div class="key">Started</div><div class="val">${new Date(s.started_at + 'Z').toLocaleString()}</div>
             <div class="key">Ended</div><div class="val">${s.ended_at ? new Date(s.ended_at + 'Z').toLocaleString() : '-'}</div>
-            <div class="key">Prompt Tokens</div><div class="val">${s.prompt_tokens}</div>
-            <div class="key">Completion Tokens</div><div class="val">${s.completion_tokens}</div>
-            <div class="key">Total Tokens</div><div class="val">${s.prompt_tokens + s.completion_tokens}</div>
+            <div class="key">Prompt Tokens</div><div class="val">${formatNum(s.prompt_tokens)}</div>
+            <div class="key">Completion Tokens</div><div class="val">${formatNum(s.completion_tokens)}</div>
+            <div class="key">Total Tokens</div><div class="val">${formatNum(s.prompt_tokens + s.completion_tokens)}</div>
             <div class="key">Duration</div><div class="val">${s.duration_ms >= 1000 ? (s.duration_ms/1000).toFixed(1)+'s' : s.duration_ms+'ms'}</div>
             ${s.error_message ? '<div class="key">Error</div><div class="val" style="color:#c53030;">'+esc(s.error_message)+'</div>' : ''}
         `;
     });
 
 function esc(s) { return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m]); }
+function formatNum(n) { if (n >= 1000000) return ((n/1000000).toFixed(1)+'M').replace('.0',''); if (n >= 1000) return ((n/1000).toFixed(1)+'K').replace('.0',''); return String(n); }
 </script>
 {{end}}

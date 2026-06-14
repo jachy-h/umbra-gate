@@ -13,6 +13,8 @@ import (
 	"github.com/anomalyco/llm-gateway/config"
 )
 
+const defaultAnthropicVersion = "2023-06-01"
+
 type anthropicUsage struct {
 	InputTokens  int `json:"input_tokens"`
 	OutputTokens int `json:"output_tokens"`
@@ -33,7 +35,7 @@ type anthropicMessage struct {
 	Stream bool   `json:"stream,omitempty"`
 }
 
-func (p *Proxy) handleAnthropic(w http.ResponseWriter, r *http.Request, providerName string, providerCfg *config.ProviderConfig, target *url.URL, path string) {
+func (p *Proxy) handleAnthropic(w http.ResponseWriter, r *http.Request, providerName string, providerCfg *config.ProviderConfig, upstream *url.URL) {
 	startTime := time.Now()
 
 	bodyBytes, err := io.ReadAll(io.LimitReader(r.Body, 10<<20))
@@ -53,7 +55,7 @@ func (p *Proxy) handleAnthropic(w http.ResponseWriter, r *http.Request, provider
 		model = "unknown"
 	}
 
-	slog.Info("request", "provider", providerName, "model", model, "path", path)
+	slog.Info("request", "provider", providerName, "model", model, "path", upstream.Path)
 
 	providerID, err := p.db.EnsureProvider(providerName)
 	if err != nil {
@@ -70,15 +72,30 @@ func (p *Proxy) handleAnthropic(w http.ResponseWriter, r *http.Request, provider
 	}
 
 	if msg.Stream {
-		p.proxyAnthropicStream(w, r, providerCfg, target, path, bodyBytes, sessionID, startTime)
+		p.proxyAnthropicStream(w, r, providerCfg, upstream, bodyBytes, sessionID, startTime)
 	} else {
-		p.proxyAnthropicNonStream(w, r, providerCfg, target, path, bodyBytes, sessionID, startTime)
+		p.proxyAnthropicNonStream(w, r, providerCfg, upstream, bodyBytes, sessionID, startTime)
 	}
 }
 
-func (p *Proxy) proxyAnthropicNonStream(w http.ResponseWriter, r *http.Request, providerCfg *config.ProviderConfig, target *url.URL, path string, bodyBytes []byte, sessionID int64, startTime time.Time) {
-	upstreamURL := target.String() + path
-	req, err := http.NewRequestWithContext(r.Context(), "POST", upstreamURL, bytes.NewReader(bodyBytes))
+func (p *Proxy) buildAnthropicRequest(r *http.Request, providerCfg *config.ProviderConfig, upstream *url.URL, bodyBytes []byte) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(r.Context(), r.Method, upstream.String(), bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, err
+	}
+	copyForwardableHeaders(req.Header, r.Header)
+	req.Header.Set("x-api-key", providerCfg.APIKey)
+	if req.Header.Get("anthropic-version") == "" {
+		req.Header.Set("anthropic-version", defaultAnthropicVersion)
+	}
+	if req.Header.Get("Content-Type") == "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	return req, nil
+}
+
+func (p *Proxy) proxyAnthropicNonStream(w http.ResponseWriter, r *http.Request, providerCfg *config.ProviderConfig, upstream *url.URL, bodyBytes []byte, sessionID int64, startTime time.Time) {
+	req, err := p.buildAnthropicRequest(r, providerCfg, upstream, bodyBytes)
 	if err != nil {
 		errMsg := err.Error()
 		p.db.CompleteSession(sessionID, 0, 0, 0, &errMsg)
@@ -86,9 +103,6 @@ func (p *Proxy) proxyAnthropicNonStream(w http.ResponseWriter, r *http.Request, 
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", providerCfg.APIKey)
-	req.Header.Set("anthropic-version", "2023-06-01")
 
 	resp, err := p.client.Do(req)
 	if err != nil {
@@ -112,9 +126,7 @@ func (p *Proxy) proxyAnthropicNonStream(w http.ResponseWriter, r *http.Request, 
 	if resp.StatusCode != http.StatusOK {
 		errMsg := string(respBody)
 		p.db.CompleteSession(sessionID, 0, 0, time.Since(startTime).Milliseconds(), &errMsg)
-		for k, v := range resp.Header {
-			w.Header()[k] = v
-		}
+		copyResponseHeaders(w.Header(), resp.Header)
 		w.WriteHeader(resp.StatusCode)
 		w.Write(respBody)
 		return
@@ -132,16 +144,13 @@ func (p *Proxy) proxyAnthropicNonStream(w http.ResponseWriter, r *http.Request, 
 	p.db.CompleteSession(sessionID, promptTokens, completionTokens, durationMs, nil)
 	p.db.CreateRequest(sessionID, promptTokens, completionTokens, durationMs, nil)
 
-	for k, v := range resp.Header {
-		w.Header()[k] = v
-	}
+	copyResponseHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
 	w.Write(respBody)
 }
 
-func (p *Proxy) proxyAnthropicStream(w http.ResponseWriter, r *http.Request, providerCfg *config.ProviderConfig, target *url.URL, path string, bodyBytes []byte, sessionID int64, startTime time.Time) {
-	upstreamURL := target.String() + path
-	req, err := http.NewRequestWithContext(r.Context(), "POST", upstreamURL, bytes.NewReader(bodyBytes))
+func (p *Proxy) proxyAnthropicStream(w http.ResponseWriter, r *http.Request, providerCfg *config.ProviderConfig, upstream *url.URL, bodyBytes []byte, sessionID int64, startTime time.Time) {
+	req, err := p.buildAnthropicRequest(r, providerCfg, upstream, bodyBytes)
 	if err != nil {
 		errMsg := err.Error()
 		p.db.CompleteSession(sessionID, 0, 0, 0, &errMsg)
@@ -149,9 +158,6 @@ func (p *Proxy) proxyAnthropicStream(w http.ResponseWriter, r *http.Request, pro
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", providerCfg.APIKey)
-	req.Header.Set("anthropic-version", "2023-06-01")
 
 	resp, err := p.client.Do(req)
 	if err != nil {
@@ -170,17 +176,13 @@ func (p *Proxy) proxyAnthropicStream(w http.ResponseWriter, r *http.Request, pro
 			errMsg = string(body)
 		}
 		p.db.CompleteSession(sessionID, 0, 0, time.Since(startTime).Milliseconds(), &errMsg)
-		for k, v := range resp.Header {
-			w.Header()[k] = v
-		}
+		copyResponseHeaders(w.Header(), resp.Header)
 		w.WriteHeader(resp.StatusCode)
 		w.Write(body)
 		return
 	}
 
-	for k, v := range resp.Header {
-		w.Header()[k] = v
-	}
+	copyResponseHeaders(w.Header(), resp.Header)
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")

@@ -1,0 +1,144 @@
+{{define "content"}}
+<h1 class="page-title">Providers</h1>
+<p class="empty-state" style="margin-bottom:16px;">opencode CLI manages provider credentials. Toggle the switch to route a provider's traffic through this local gateway. Changes are written to your opencode config file.</p>
+
+<div class="card">
+    <div id="providerTableContainer"><div class="empty-state">Loading...</div></div>
+    <div id="globalStatus" class="empty-state" style="min-height:20px;margin-top:8px;"></div>
+</div>
+
+<style>
+.gw-cell { display:flex; align-items:center; gap:10px; }
+.gw-cell label { margin:0; padding:0; display:inline-flex; align-items:center; }
+.gw-cell input[type="checkbox"][role="switch"] { margin:0; --pico-line-height:1; }
+.gw-status { font-size:13px; color:#6b7280; min-width:70px; }
+.gw-status.on { color:#0d7d44; font-weight:600; }
+.config-path { font-family: ui-monospace, Menlo, monospace; font-size:11px; color:#6b7280; padding:6px 10px; background:#f9fafb; border-radius:4px; display:inline-block; margin-bottom:12px; }
+.row-source { font-size:11px; color:#6b7280; text-transform:uppercase; letter-spacing:0.5px; margin-left:8px; }
+.gw-cell input[type="checkbox"][role="switch"]:checked { --pico-color: #4f46e5; --pico-background-color: #4f46e5; --pico-border-color: #4f46e5; }
+</style>
+
+<script>
+let configPath = '';
+
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m]); }
+
+function setStatus(text, isError) {
+    const el = document.getElementById('globalStatus');
+    el.textContent = text || '';
+    el.style.color = isError ? '#c53030' : '#0d7d44';
+    if (text && !isError) setTimeout(() => { if (el.textContent === text) el.textContent = ''; }, 3000);
+}
+
+function buildRows(openRows, gwRows) {
+    const combined = [];
+    openRows.forEach(p => {
+        combined.push({
+            id: p.id, name: p.name, source: 'opencode',
+            built_in: p.built_in, configured: p.configured,
+            gateway_enabled: p.gateway_enabled, hasGw: false, gwType: '', gwBaseUrl: ''
+        });
+    });
+    gwRows.forEach(p => {
+        const existing = combined.find(r => r.id.toLowerCase() === p.id.toLowerCase());
+        if (existing) {
+            existing.hasGw = true;
+            existing.gwType = p.type;
+            existing.gwBaseUrl = p.base_url;
+        } else {
+            combined.push({
+                id: p.id, name: p.id, source: 'gateway', type: p.type,
+                built_in: false, configured: false, gateway_enabled: false,
+                hasGw: true, gwType: p.type, gwBaseUrl: p.base_url
+            });
+        }
+    });
+    return combined;
+}
+
+function renderTable(rows) {
+    const container = document.getElementById('providerTableContainer');
+    if (!rows.length) {
+        container.innerHTML = '<div class="empty-state">No providers available.</div>';
+        return;
+    }
+    const pathHtml = configPath ? `<div class="config-path">writes to: ${esc(configPath)}</div>` : '';
+    container.innerHTML = pathHtml + `<table>
+        <thead><tr><th>Provider</th><th>Status</th><th>Gateway forwarding</th></tr></thead>
+        <tbody>
+        ${rows.map(p => {
+            const tags = [];
+            if (p.built_in) tags.push('<span class="badge badge-success">built-in</span>');
+            if (p.configured) tags.push('<span class="badge badge-success">configured</span>');
+            if (p.hasGw) tags.push('<span class="badge badge-success">gateway upstream</span>');
+            if (!tags.length) tags.push('<span class="badge badge-pending">unconfigured</span>');
+
+            const canToggle = p.source === 'opencode';
+            const gwCell = canToggle
+                ? `<div class="gw-cell">
+                       <label>
+                           <input type="checkbox" role="switch" data-id="${esc(p.id)}" class="gw-switch" ${p.gateway_enabled ? 'checked' : ''}>
+                       </label>
+                       <span class="gw-status ${p.gateway_enabled ? 'on' : ''}">${p.gateway_enabled ? 'On' : 'Off'}</span>
+                   </div>`
+                : `<span class="empty-state" style="padding:0;font-size:13px;">— gateway upstream</span>`;
+
+            return `<tr>
+                <td><strong>${esc(p.name)}</strong>${p.source === 'gateway' ? '<span class="row-source">gateway-only</span>' : ''}</td>
+                <td>${tags.join(' ')}</td>
+                <td>${gwCell}</td>
+            </tr>`;
+        }).join('')}
+        </tbody></table>`;
+
+    container.querySelectorAll('.gw-switch').forEach(input => {
+        input.addEventListener('change', () => onToggle(input));
+    });
+}
+
+function onToggle(input) {
+    const id = input.dataset.id;
+    const enabled = input.checked;
+    const status = input.closest('.gw-cell').querySelector('.gw-status');
+    input.disabled = true;
+    status.textContent = enabled ? 'Enabling...' : 'Disabling...';
+    status.classList.remove('on');
+
+    fetch('/dashboard/providers/gateway', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id, enabled, path: configPath})
+    }).then(r => r.ok ? r.json() : r.json().then(j => Promise.reject(j.error || 'failed')))
+      .then(() => {
+        status.textContent = enabled ? 'On' : 'Off';
+        status.classList.toggle('on', enabled);
+        setStatus(`Gateway ${enabled ? 'enabled' : 'disabled'} for ${id}.`);
+      })
+      .catch(err => {
+        input.checked = !enabled;
+        status.textContent = !enabled ? 'On' : 'Off';
+        status.classList.toggle('on', !enabled);
+        setStatus(typeof err === 'string' ? err : 'Failed to update.', true);
+      })
+      .finally(() => {
+        input.disabled = false;
+      });
+}
+
+function loadData() {
+    Promise.all([
+        fetch('/dashboard/providers/config').then(r => r.json()),
+        fetch('/api/gateway/providers').then(r => r.json())
+    ]).then(([cfgData, gwData]) => {
+        const files = cfgData.files || [];
+        const selected = files.find(f => f.selected) || files[0];
+        configPath = selected ? selected.path : '';
+        renderTable(buildRows(cfgData.providers || [], Array.isArray(gwData) ? gwData : []));
+    }).catch(() => {
+        document.getElementById('providerTableContainer').innerHTML = '<div class="empty-state">Failed to load providers.</div>';
+    });
+}
+
+loadData();
+</script>
+{{end}}
