@@ -1,71 +1,91 @@
 {{define "content"}}
-<h1 style="margin-bottom:24px;font-size:24px;">Dashboard</h1>
+<h1 class="page-title">Dashboard</h1>
 
 <div class="stats">
     <div class="stat">
-        <div class="label">Today Requests</div>
-        <div class="value">{{.Stats.TodayRequests}}</div>
+        <div class="icon">⇄</div>
+        <div>
+            <div class="label">Today Requests</div>
+            <div class="value">{{.Stats.TodayRequests}}</div>
+        </div>
     </div>
     <div class="stat">
-        <div class="label">Month Requests</div>
-        <div class="value">{{.Stats.MonthRequests}}</div>
+        <div class="icon">↻</div>
+        <div>
+            <div class="label">Month Requests</div>
+            <div class="value">{{.Stats.MonthRequests}}</div>
+        </div>
     </div>
     <div class="stat">
-        <div class="label">Today Tokens</div>
-        <div class="value">{{formatNum .Stats.TodayTokens}}</div>
+        <div class="icon">◈</div>
+        <div>
+            <div class="label">Today Tokens</div>
+            <div class="value">{{formatNum .Stats.TodayTokens}}</div>
+        </div>
     </div>
     <div class="stat">
-        <div class="label">Month Tokens</div>
-        <div class="value">{{formatNum .Stats.MonthTokens}}</div>
+        <div class="icon">◆</div>
+        <div>
+            <div class="label">Month Tokens</div>
+            <div class="value">{{formatNum .Stats.MonthTokens}}</div>
+        </div>
     </div>
 </div>
 
-<div class="card" style="margin-top:24px;">
-    <h2>Top Models</h2>
-    <div class="chart-container">
-        <canvas id="modelChart"></canvas>
+<div class="dashboard-grid">
+    <div class="card">
+        <h2>Tokens by Provider</h2>
+        <div id="providersUsage" class="usage-list"><div class="empty-state">Loading...</div></div>
+    </div>
+    <div class="card">
+        <h2>Tokens by Model</h2>
+        <div id="modelsUsage" class="usage-list"><div class="empty-state">Loading...</div></div>
     </div>
 </div>
 
 <script>
-fetch('/api/models')
-    .then(r => r.json())
-    .then(data => {
-        const ctx = document.getElementById('modelChart').getContext('2d');
-        const labels = data.slice(0, 10).map(d => d.model);
-        const values = data.slice(0, 10).map(d => d.total_tokens);
-        drawBarChart(ctx, labels, values, 'Tokens by Model');
-    });
+loadUsage('/api/providers', 'providersUsage', item => item.provider_name);
+loadUsage('/api/models', 'modelsUsage', item => item.model);
 
-function drawBarChart(ctx, labels, values, title) {
-    const w = ctx.canvas.width = ctx.canvas.parentElement.clientWidth;
-    const h = ctx.canvas.height = 280;
-    const pad = { top: 20, right: 20, bottom: 60, left: 80 };
-    const chartW = w - pad.left - pad.right;
-    const chartH = h - pad.top - pad.bottom;
-    const maxVal = Math.max(...values, 1);
-
-    ctx.fillStyle = '#f5f5f5';
-    ctx.fillRect(0, 0, w, h);
-
-    const barW = Math.min(40, chartW / labels.length * 0.7);
-    const gap = chartW / labels.length;
-
-    values.forEach((v, i) => {
-        const barH = (v / maxVal) * chartH;
-        const x = pad.left + i * gap + (gap - barW) / 2;
-        const y = pad.top + chartH - barH;
-        ctx.fillStyle = '#4f46e5';
-        ctx.fillRect(x, y, barW, barH);
-    });
-
-    ctx.fillStyle = '#888';
-    ctx.font = '11px sans-serif';
-    ctx.textAlign = 'center';
-    labels.forEach((l, i) => {
-        const x = pad.left + i * gap + gap / 2;
-        ctx.fillText(l.length > 15 ? l.slice(0,15)+'...' : l, x, h - 10);
-    });
+function loadUsage(url, elementId, labelFor) {
+    fetch(url)
+        .then(r => r.ok ? r.json() : Promise.reject(new Error('request failed')))
+        .then(data => renderUsage(elementId, data, labelFor))
+        .catch(() => {
+            document.getElementById(elementId).innerHTML = '<div class="empty-state">Failed to load usage</div>';
+        });
 }
+
+function renderUsage(elementId, data, labelFor) {
+    const el = document.getElementById(elementId);
+    if (!Array.isArray(data) || data.length === 0) {
+        el.innerHTML = '<div class="empty-state">No usage yet</div>';
+        return;
+    }
+
+    const rows = data.slice(0, 10);
+    const maxTokens = Math.max(...rows.map(item => item.total_tokens), 1);
+    el.innerHTML = rows.map(item => {
+        const tokens = item.total_tokens || 0;
+        const width = Math.max(2, Math.round(tokens / maxTokens * 100));
+        return `
+            <div class="usage-row">
+                <div class="usage-meta">
+                    <span class="usage-name">${esc(labelFor(item))}</span>
+                    <span class="usage-value">${formatNum(tokens)} tokens</span>
+                </div>
+                <div class="usage-bar"><div class="usage-fill" style="width:${width}%"></div></div>
+            </div>
+        `;
+    }).join('');
+}
+
+function formatNum(n) {
+    if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+    if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+    return String(n);
+}
+
+function esc(s) { return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m]); }
 </script>
 {{end}}

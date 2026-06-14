@@ -1,0 +1,52 @@
+package api
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"testing"
+
+	"github.com/anomalyco/llm-gateway/db"
+)
+
+func TestProvidersEndpointReturnsProviderStats(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "router.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer database.Close()
+
+	providerID, err := database.EnsureProvider("openai")
+	if err != nil {
+		t.Fatalf("EnsureProvider() error = %v", err)
+	}
+	sessionID, err := database.CreateSession(providerID, "gpt-4o")
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if err := database.CompleteSession(sessionID, 100, 50, 1000, nil); err != nil {
+		t.Fatalf("CompleteSession() error = %v", err)
+	}
+
+	handler := New(database)
+	req := httptest.NewRequest(http.MethodGet, "/providers", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var stats []db.ProviderStats
+	if err := json.NewDecoder(w.Body).Decode(&stats); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if len(stats) != 1 {
+		t.Fatalf("len(stats) = %d, want 1", len(stats))
+	}
+	if stats[0].ProviderName != "openai" || stats[0].RequestCount != 1 || stats[0].TotalTokens != 150 {
+		t.Fatalf("stats[0] = %+v, want openai totals", stats[0])
+	}
+}

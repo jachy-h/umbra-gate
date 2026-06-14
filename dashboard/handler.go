@@ -20,8 +20,8 @@ type pageData struct {
 }
 
 type Handler struct {
-	db   *db.DB
-	tmpl *template.Template
+	db        *db.DB
+	templates map[string]*template.Template
 }
 
 func New(database *db.DB) *Handler {
@@ -37,8 +37,13 @@ func New(database *db.DB) *Handler {
 		},
 	}
 
-	tmpl := template.Must(template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/*.html"))
-	return &Handler{db: database, tmpl: tmpl}
+	templates := map[string]*template.Template{
+		"home":           template.Must(template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/layout.html", "templates/home.html")),
+		"sessions":       template.Must(template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/layout.html", "templates/sessions.html")),
+		"session_detail": template.Must(template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/layout.html", "templates/session_detail.html")),
+		"models":         template.Must(template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/layout.html", "templates/models.html")),
+	}
+	return &Handler{db: database, templates: templates}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -73,23 +78,28 @@ func (h *Handler) home(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.Error("failed to get stats", "error", err)
 	}
-	h.render(w, pageData{Active: "home", Stats: stats})
+	h.render(w, "home", pageData{Active: "home", Stats: stats})
 }
 
 func (h *Handler) sessions(w http.ResponseWriter, r *http.Request) {
-	h.render(w, pageData{Active: "sessions"})
+	h.render(w, "sessions", pageData{Active: "sessions"})
 }
 
 func (h *Handler) sessionDetail(w http.ResponseWriter, r *http.Request) {
-	h.render(w, pageData{Active: "sessions"})
+	h.render(w, "session_detail", pageData{Active: "sessions"})
 }
 
 func (h *Handler) models(w http.ResponseWriter, r *http.Request) {
-	h.render(w, pageData{Active: "models"})
+	h.render(w, "models", pageData{Active: "models"})
 }
 
-func (h *Handler) render(w http.ResponseWriter, data pageData) {
-	if err := h.tmpl.ExecuteTemplate(w, "layout.html", data); err != nil {
+func (h *Handler) render(w http.ResponseWriter, name string, data pageData) {
+	tmpl, ok := h.templates[name]
+	if !ok {
+		http.Error(w, "template not found", http.StatusInternalServerError)
+		return
+	}
+	if err := tmpl.ExecuteTemplate(w, "layout.html", data); err != nil {
 		slog.Error("failed to render template", "error", err)
 	}
 }

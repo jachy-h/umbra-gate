@@ -30,6 +30,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleSessions(w, r)
 	case "/models":
 		h.handleModels(w, r)
+	case "/providers":
+		h.handleProviders(w, r)
 	default:
 		idStr := strings.TrimPrefix(r.URL.Path, "/sessions/")
 		if idStr != r.URL.Path {
@@ -101,6 +103,18 @@ func (h *Handler) handleModels(w http.ResponseWriter, r *http.Request) {
 	}
 	if stats == nil {
 		stats = []db.ModelStats{}
+	}
+	writeJSON(w, stats)
+}
+
+func (h *Handler) handleProviders(w http.ResponseWriter, r *http.Request) {
+	stats, err := h.db.GetProviderStats()
+	if err != nil {
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
+	}
+	if stats == nil {
+		stats = []db.ProviderStats{}
 	}
 	writeJSON(w, stats)
 }
