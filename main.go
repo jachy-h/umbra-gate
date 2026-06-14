@@ -46,11 +46,17 @@ func main() {
 	dashHandler := dashboard.New(database)
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			http.Redirect(w, r, "/dashboard", http.StatusFound)
+			return
+		}
+		proxyHandler.ServeHTTP(w, r)
+	})
 	mux.Handle("/api/", http.StripPrefix("/api", apiHandler))
 	mux.Handle("/api", apiHandler)
 	mux.Handle("/dashboard", dashHandler)
 	mux.Handle("/dashboard/", dashHandler)
-	mux.Handle("/", proxyHandler)
 
 	srv := &http.Server{
 		Addr:    cfg.Listen,
