@@ -52,6 +52,13 @@ type ModelStats struct {
 	AvgDurationMs float64 `json:"avg_duration_ms"`
 }
 
+type ProviderStats struct {
+	ProviderName  string  `json:"provider_name"`
+	RequestCount  int64   `json:"request_count"`
+	TotalTokens   int64   `json:"total_tokens"`
+	AvgDurationMs float64 `json:"avg_duration_ms"`
+}
+
 func (d *DB) EnsureProvider(name string) (int64, error) {
 	var id int64
 	err := d.conn.QueryRow("SELECT id FROM providers WHERE name = ?", name).Scan(&id)
@@ -189,6 +196,33 @@ func (d *DB) GetModelStats() ([]ModelStats, error) {
 	for rows.Next() {
 		var s ModelStats
 		if err := rows.Scan(&s.Model, &s.RequestCount, &s.TotalTokens, &s.AvgDurationMs); err != nil {
+			return nil, err
+		}
+		stats = append(stats, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return stats, nil
+}
+
+func (d *DB) GetProviderStats() ([]ProviderStats, error) {
+	rows, err := d.conn.Query(
+		`SELECT p.name, COUNT(*) as cnt, COALESCE(SUM(s.prompt_tokens + s.completion_tokens), 0) as total_tokens,
+		        COALESCE(AVG(s.duration_ms), 0) as avg_duration
+		 FROM sessions s JOIN providers p ON s.provider_id = p.id
+		 WHERE s.status = 'success'
+		 GROUP BY p.name ORDER BY total_tokens DESC`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var stats []ProviderStats
+	for rows.Next() {
+		var s ProviderStats
+		if err := rows.Scan(&s.ProviderName, &s.RequestCount, &s.TotalTokens, &s.AvgDurationMs); err != nil {
 			return nil, err
 		}
 		stats = append(stats, s)
