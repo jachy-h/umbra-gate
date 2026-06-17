@@ -6,6 +6,21 @@
     <div class="detail-grid" id="detailGrid"></div>
 </div>
 
+<div class="card" id="logCard" style="margin-top:24px;display:none;">
+    <h2 style="margin:0 0 12px 0;font-size:18px;">HTTP Request / Response Log</h2>
+    <p style="color:#666;font-size:13px;margin:0 0 16px 0;">仅保留最近 10 条请求的原始 HTTP 数据用于排查。Authorization / API key 已脱敏。</p>
+    <div id="logContent"></div>
+</div>
+
+<style>
+.log-section { margin-bottom: 16px; }
+.log-section-title { font-weight: 600; font-size: 13px; color: #444; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+.log-pre { background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 4px; padding: 10px 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; max-height: 320px; overflow: auto; margin: 0; }
+.log-meta { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: #555; margin-bottom: 12px; }
+.log-meta span strong { color: #222; }
+.no-log { color: #888; font-size: 13px; padding: 12px 0; }
+</style>
+
 <script>
 const id = window.location.pathname.split('/').pop();
 document.getElementById('sessionId').textContent = id;
@@ -27,7 +42,59 @@ fetch('/api/sessions/' + id)
         `;
     });
 
+fetch('/api/sessions/' + id + '/log')
+    .then(r => {
+        if (r.status === 404) return null;
+        if (!r.ok) throw new Error('failed to load log');
+        return r.json();
+    })
+    .then(log => {
+        const card = document.getElementById('logCard');
+        const content = document.getElementById('logContent');
+        card.style.display = 'block';
+        if (!log) {
+            content.innerHTML = '<p class="no-log">No HTTP log retained for this session. Only the most recent 10 requests are kept; older entries have been pruned.</p>';
+            return;
+        }
+        content.innerHTML = `
+            <div class="log-meta">
+                <span><strong>${esc(log.method)}</strong> ${esc(log.url)}</span>
+                <span>Status: <strong>${log.response_status || '-'}</strong></span>
+                <span>Duration: <strong>${log.duration_ms}ms</strong></span>
+                <span>Captured: <strong>${new Date(log.created_at + 'Z').toLocaleString()}</strong></span>
+            </div>
+            <div class="log-section">
+                <div class="log-section-title">Request Headers</div>
+                <pre class="log-pre">${esc(log.request_headers || '(none)')}</pre>
+            </div>
+            <div class="log-section">
+                <div class="log-section-title">Request Body</div>
+                <pre class="log-pre">${esc(prettyJSON(log.request_body))}</pre>
+            </div>
+            <div class="log-section">
+                <div class="log-section-title">Response Headers</div>
+                <pre class="log-pre">${esc(log.response_headers || '(none)')}</pre>
+            </div>
+            <div class="log-section">
+                <div class="log-section-title">Response Body</div>
+                <pre class="log-pre">${esc(prettyJSON(log.response_body))}</pre>
+            </div>
+        `;
+    })
+    .catch(err => {
+        const card = document.getElementById('logCard');
+        const content = document.getElementById('logContent');
+        card.style.display = 'block';
+        content.innerHTML = '<p class="no-log">Failed to load HTTP log: ' + esc(String(err)) + '</p>';
+    });
+
 function esc(s) { return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m]); }
 function formatNum(n) { if (n >= 1000000) return ((n/1000000).toFixed(1)+'M').replace('.0',''); if (n >= 1000) return ((n/1000).toFixed(1)+'K').replace('.0',''); return String(n); }
+function prettyJSON(s) {
+    if (!s) return '(empty)';
+    const trimmed = s.trim();
+    if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return s;
+    try { return JSON.stringify(JSON.parse(trimmed), null, 2); } catch (_) { return s; }
+}
 </script>
 {{end}}

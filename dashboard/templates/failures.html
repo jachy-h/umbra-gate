@@ -1,0 +1,138 @@
+{{define "content"}}
+<h1 class="page-title">Failures</h1>
+
+<div class="analytics-toolbar">
+    <label for="failureAnalyticsRange">Time Range</label>
+    <select id="failureAnalyticsRange" aria-label="Failure analytics time range">
+        <option value="24h">24h</option>
+        <option value="7d" selected>7d</option>
+        <option value="30d">30d</option>
+        <option value="90d">90d</option>
+    </select>
+</div>
+
+<div class="stats overview-stats" id="failureSummary">
+    <div class="stat">
+        <div class="icon">!</div>
+        <div>
+            <div class="label">Total Failures</div>
+            <div class="value" id="totalFailures">—</div>
+        </div>
+    </div>
+    <div class="stat">
+        <div class="icon">#</div>
+        <div>
+            <div class="label">Categories</div>
+            <div class="value" id="totalCategories">—</div>
+        </div>
+    </div>
+    <div class="stat">
+        <div class="icon">P</div>
+        <div>
+            <div class="label">Providers</div>
+            <div class="value" id="totalFailureProviders">—</div>
+        </div>
+    </div>
+    <div class="stat">
+        <div class="icon">M</div>
+        <div>
+            <div class="label">Models</div>
+            <div class="value" id="totalFailureModels">—</div>
+        </div>
+    </div>
+</div>
+
+<div class="dashboard-grid">
+    <div class="card">
+        <h2>Failure Categories</h2>
+        <div id="failureCategories" class="usage-list"><div class="empty-state">Loading...</div></div>
+    </div>
+    <div class="card">
+        <h2>Failures by Provider</h2>
+        <div id="failureProviders" class="usage-list"><div class="empty-state">Loading...</div></div>
+    </div>
+    <div class="card">
+        <h2>Failures by Model</h2>
+        <div id="failureModels" class="usage-list"><div class="empty-state">Loading...</div></div>
+    </div>
+    <div class="card">
+        <h2>Recent Failures</h2>
+        <div id="recentFailures"><div class="empty-state">Loading...</div></div>
+    </div>
+</div>
+
+<script>
+document.getElementById('failureAnalyticsRange').addEventListener('change', loadFailures);
+loadFailures();
+
+function selectedRange() {
+    return document.getElementById('failureAnalyticsRange').value || '7d';
+}
+
+function loadFailures() {
+    fetch(`/api/failures?range=${encodeURIComponent(selectedRange())}`)
+        .then(r => r.ok ? r.json() : Promise.reject(new Error('request failed')))
+        .then(renderFailures)
+        .catch(() => {
+            document.getElementById('failureCategories').innerHTML = '<div class="empty-state">Failed to load failures.</div>';
+            document.getElementById('failureProviders').innerHTML = '<div class="empty-state">Failed to load failures.</div>';
+            document.getElementById('failureModels').innerHTML = '<div class="empty-state">Failed to load failures.</div>';
+            document.getElementById('recentFailures').innerHTML = '<div class="empty-state">Failed to load failures.</div>';
+        });
+}
+
+function renderFailures(data) {
+    document.getElementById('totalFailures').textContent = formatNum(data.total_failures || 0);
+    document.getElementById('totalCategories').textContent = formatNum((data.categories || []).length);
+    document.getElementById('totalFailureProviders').textContent = formatNum((data.providers || []).length);
+    document.getElementById('totalFailureModels').textContent = formatNum((data.models || []).length);
+    renderBreakdown('failureCategories', data.categories || [], row => row.category, row => row.count);
+    renderBreakdown('failureProviders', data.providers || [], row => row.name, row => row.count);
+    renderBreakdown('failureModels', data.models || [], row => row.name, row => row.count);
+    renderRecent(data.recent || []);
+}
+
+function renderBreakdown(elementId, rows, labelFor, valueFor) {
+    const el = document.getElementById(elementId);
+    if (!rows.length) {
+        el.innerHTML = '<div class="empty-state">No failures.</div>';
+        return;
+    }
+    const max = Math.max(...rows.map(valueFor), 1);
+    el.innerHTML = rows.map(row => {
+        const value = valueFor(row) || 0;
+        const width = Math.max(2, Math.round(value / max * 100));
+        return `<div class="usage-row">
+            <div class="usage-meta"><span class="usage-name">${esc(labelFor(row))}</span><span class="usage-value">${formatNum(value)}</span></div>
+            <div class="usage-bar"><div class="usage-fill" style="width:${width}%"></div></div>
+        </div>`;
+    }).join('');
+}
+
+function renderRecent(rows) {
+    const el = document.getElementById('recentFailures');
+    if (!rows.length) {
+        el.innerHTML = '<div class="empty-state">No recent failures.</div>';
+        return;
+    }
+    el.innerHTML = `<table><thead><tr><th>Time</th><th>Provider</th><th>Model</th><th>Error</th><th></th></tr></thead><tbody>${rows.map(row => `
+        <tr>
+            <td>${esc(fmtTime(row.started_at))}</td>
+            <td>${esc(row.provider_name)}</td>
+            <td>${esc(row.model)}</td>
+            <td>${esc(row.error_message || '')}</td>
+            <td><a href="/dashboard/sessions/${row.id}">View</a></td>
+        </tr>
+    `).join('')}</tbody></table>`;
+}
+
+function formatNum(n) {
+    if (n >= 1000000) return ((n / 1000000).toFixed(1) + 'M').replace('.0', '');
+    if (n >= 1000) return ((n / 1000).toFixed(1) + 'K').replace('.0', '');
+    return String(n);
+}
+
+function fmtTime(t) { return t ? new Date(t + 'Z').toLocaleString() : ''; }
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m]); }
+</script>
+{{end}}

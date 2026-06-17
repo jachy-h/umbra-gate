@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/anomalyco/llm-gateway/config"
+	"github.com/anomalyco/llm-gateway/db"
 )
 
 const defaultAnthropicVersion = "2023-06-01"
@@ -72,9 +73,9 @@ func (p *Proxy) handleAnthropic(w http.ResponseWriter, r *http.Request, provider
 	}
 
 	if msg.Stream {
-		p.proxyAnthropicStream(w, r, providerCfg, upstream, bodyBytes, sessionID, startTime)
+		p.proxyAnthropicStream(w, r, providerName, providerCfg, upstream, bodyBytes, sessionID, startTime)
 	} else {
-		p.proxyAnthropicNonStream(w, r, providerCfg, upstream, bodyBytes, sessionID, startTime)
+		p.proxyAnthropicNonStream(w, r, providerName, providerCfg, upstream, bodyBytes, sessionID, startTime)
 	}
 }
 
@@ -96,7 +97,7 @@ func (p *Proxy) buildAnthropicRequest(r *http.Request, providerCfg *config.Provi
 	return req, nil
 }
 
-func (p *Proxy) proxyAnthropicNonStream(w http.ResponseWriter, r *http.Request, providerCfg *config.ProviderConfig, upstream *url.URL, bodyBytes []byte, sessionID int64, startTime time.Time) {
+func (p *Proxy) proxyAnthropicNonStream(w http.ResponseWriter, r *http.Request, providerName string, providerCfg *config.ProviderConfig, upstream *url.URL, bodyBytes []byte, sessionID int64, startTime time.Time) {
 	req, err := p.buildAnthropicRequest(r, providerCfg, upstream, bodyBytes)
 	if err != nil {
 		errMsg := err.Error()
@@ -109,7 +110,18 @@ func (p *Proxy) proxyAnthropicNonStream(w http.ResponseWriter, r *http.Request, 
 	resp, err := p.client.Do(req)
 	if err != nil {
 		errMsg := err.Error()
-		p.db.CompleteSession(sessionID, 0, 0, time.Since(startTime).Milliseconds(), &errMsg)
+		durationMs := time.Since(startTime).Milliseconds()
+		p.db.CompleteSession(sessionID, 0, 0, durationMs, &errMsg)
+		captureRequestLog(p.db, db.RequestLog{
+			SessionID:      sessionID,
+			ProviderName:   providerName,
+			Method:         req.Method,
+			URL:            req.URL.String(),
+			RequestHeaders: serializeHeaders(req.Header),
+			RequestBody:    string(bodyBytes),
+			ResponseBody:   "upstream error: " + errMsg,
+			DurationMs:     durationMs,
+		})
 		slog.Error("upstream request failed", "error", err)
 		http.Error(w, "upstream error", http.StatusBadGateway)
 		return
@@ -125,9 +137,23 @@ func (p *Proxy) proxyAnthropicNonStream(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
+	durationMs := time.Since(startTime).Milliseconds()
+
 	if resp.StatusCode != http.StatusOK {
 		errMsg := string(respBody)
-		p.db.CompleteSession(sessionID, 0, 0, time.Since(startTime).Milliseconds(), &errMsg)
+		p.db.CompleteSession(sessionID, 0, 0, durationMs, &errMsg)
+		captureRequestLog(p.db, db.RequestLog{
+			SessionID:       sessionID,
+			ProviderName:    providerName,
+			Method:          req.Method,
+			URL:             req.URL.String(),
+			RequestHeaders:  serializeHeaders(req.Header),
+			RequestBody:     string(bodyBytes),
+			ResponseStatus:  resp.StatusCode,
+			ResponseHeaders: serializeHeaders(resp.Header),
+			ResponseBody:    string(respBody),
+			DurationMs:      durationMs,
+		})
 		copyResponseHeaders(w.Header(), resp.Header)
 		w.WriteHeader(resp.StatusCode)
 		w.Write(respBody)
@@ -139,19 +165,30 @@ func (p *Proxy) proxyAnthropicNonStream(w http.ResponseWriter, r *http.Request, 
 		slog.Warn("failed to parse upstream response", "error", err)
 	}
 
-	durationMs := time.Since(startTime).Milliseconds()
 	promptTokens := int64(antResp.Usage.InputTokens)
 	completionTokens := int64(antResp.Usage.OutputTokens)
 
 	p.db.CompleteSession(sessionID, promptTokens, completionTokens, durationMs, nil)
 	p.db.CreateRequest(sessionID, promptTokens, completionTokens, durationMs, nil)
+	captureRequestLog(p.db, db.RequestLog{
+		SessionID:       sessionID,
+		ProviderName:    providerName,
+		Method:          req.Method,
+		URL:             req.URL.String(),
+		RequestHeaders:  serializeHeaders(req.Header),
+		RequestBody:     string(bodyBytes),
+		ResponseStatus:  resp.StatusCode,
+		ResponseHeaders: serializeHeaders(resp.Header),
+		ResponseBody:    string(respBody),
+		DurationMs:      durationMs,
+	})
 
 	copyResponseHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
 	w.Write(respBody)
 }
 
-func (p *Proxy) proxyAnthropicStream(w http.ResponseWriter, r *http.Request, providerCfg *config.ProviderConfig, upstream *url.URL, bodyBytes []byte, sessionID int64, startTime time.Time) {
+func (p *Proxy) proxyAnthropicStream(w http.ResponseWriter, r *http.Request, providerName string, providerCfg *config.ProviderConfig, upstream *url.URL, bodyBytes []byte, sessionID int64, startTime time.Time) {
 	req, err := p.buildAnthropicRequest(r, providerCfg, upstream, bodyBytes)
 	if err != nil {
 		errMsg := err.Error()
@@ -164,7 +201,18 @@ func (p *Proxy) proxyAnthropicStream(w http.ResponseWriter, r *http.Request, pro
 	resp, err := p.client.Do(req)
 	if err != nil {
 		errMsg := err.Error()
-		p.db.CompleteSession(sessionID, 0, 0, time.Since(startTime).Milliseconds(), &errMsg)
+		durationMs := time.Since(startTime).Milliseconds()
+		p.db.CompleteSession(sessionID, 0, 0, durationMs, &errMsg)
+		captureRequestLog(p.db, db.RequestLog{
+			SessionID:      sessionID,
+			ProviderName:   providerName,
+			Method:         req.Method,
+			URL:            req.URL.String(),
+			RequestHeaders: serializeHeaders(req.Header),
+			RequestBody:    string(bodyBytes),
+			ResponseBody:   "upstream error: " + errMsg,
+			DurationMs:     durationMs,
+		})
 		slog.Error("upstream request failed", "error", err)
 		http.Error(w, "upstream error", http.StatusBadGateway)
 		return
@@ -177,7 +225,20 @@ func (p *Proxy) proxyAnthropicStream(w http.ResponseWriter, r *http.Request, pro
 		if readErr == nil {
 			errMsg = string(body)
 		}
-		p.db.CompleteSession(sessionID, 0, 0, time.Since(startTime).Milliseconds(), &errMsg)
+		durationMs := time.Since(startTime).Milliseconds()
+		p.db.CompleteSession(sessionID, 0, 0, durationMs, &errMsg)
+		captureRequestLog(p.db, db.RequestLog{
+			SessionID:       sessionID,
+			ProviderName:    providerName,
+			Method:          req.Method,
+			URL:             req.URL.String(),
+			RequestHeaders:  serializeHeaders(req.Header),
+			RequestBody:     string(bodyBytes),
+			ResponseStatus:  resp.StatusCode,
+			ResponseHeaders: serializeHeaders(resp.Header),
+			ResponseBody:    string(body),
+			DurationMs:      durationMs,
+		})
 		copyResponseHeaders(w.Header(), resp.Header)
 		w.WriteHeader(resp.StatusCode)
 		w.Write(body)
@@ -200,6 +261,7 @@ func (p *Proxy) proxyAnthropicStream(w http.ResponseWriter, r *http.Request, pro
 	const bufSize = 4096
 	var inputTokens, outputTokens int64
 	var leftover string
+	var capturedBody strings.Builder
 	buf := make([]byte, bufSize)
 	for {
 		n, readErr := resp.Body.Read(buf)
@@ -208,6 +270,15 @@ func (p *Proxy) proxyAnthropicStream(w http.ResponseWriter, r *http.Request, pro
 				break
 			}
 			flusher.Flush()
+
+			if capturedBody.Len() < maxLoggedBodyBytes {
+				remaining := maxLoggedBodyBytes - capturedBody.Len()
+				if n <= remaining {
+					capturedBody.Write(buf[:n])
+				} else {
+					capturedBody.Write(buf[:remaining])
+				}
+			}
 
 			data := leftover + string(buf[:n])
 			lines := strings.Split(data, "\n")
@@ -240,4 +311,16 @@ func (p *Proxy) proxyAnthropicStream(w http.ResponseWriter, r *http.Request, pro
 	durationMs := time.Since(startTime).Milliseconds()
 	p.db.CompleteSession(sessionID, inputTokens, outputTokens, durationMs, nil)
 	p.db.CreateRequest(sessionID, inputTokens, outputTokens, durationMs, nil)
+	captureRequestLog(p.db, db.RequestLog{
+		SessionID:       sessionID,
+		ProviderName:    providerName,
+		Method:          req.Method,
+		URL:             req.URL.String(),
+		RequestHeaders:  serializeHeaders(req.Header),
+		RequestBody:     string(bodyBytes),
+		ResponseStatus:  resp.StatusCode,
+		ResponseHeaders: serializeHeaders(resp.Header),
+		ResponseBody:    capturedBody.String(),
+		DurationMs:      durationMs,
+	})
 }

@@ -25,7 +25,18 @@
         .stat .icon { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; background: #eef2ff; color: #4f46e5; font-size: 22px; flex: 0 0 auto; }
         .stat .label { font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; }
         .stat .value { font-size: 28px; font-weight: 700; color: #111827; margin-top: 4px; }
+        .stat-desc { font-size: 11px; color: #9ca3af; margin-top: 4px; line-height:1.4; }
+        .dashboard-stats { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+        .dashboard-stats .stat { padding: 12px 14px; gap: 10px; }
+        .dashboard-stats .stat .icon { width: 34px; height: 34px; border-radius: 10px; font-size: 16px; }
+        .dashboard-stats .stat .label { font-size: 10px; }
+        .dashboard-stats .stat .value { font-size: 21px; margin-top: 2px; }
+        .dashboard-stats .stat-desc { display: none; }
         .trend-card { margin-top: 24px; }
+        .analytics-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: -8px 0 16px; flex-wrap: wrap; }
+        .analytics-toolbar label { color: #6b7280; font-size: 13px; font-weight: 600; margin: 0; }
+        .analytics-toolbar select { width: auto; min-width: 120px; margin: 0; }
+        .overview-stats { margin-bottom: 24px; }
         .dashboard-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-top: 24px; }
         .usage-list { display: grid; gap: 14px; }
         .usage-row { display: grid; gap: 6px; }
@@ -59,6 +70,7 @@
         <a href="/dashboard/sessions" class="{{if eq .Active "sessions"}}active{{end}}" data-i18n="sessions">Sessions</a>
         <a href="/dashboard/models" class="{{if eq .Active "models"}}active{{end}}" data-i18n="models">Models</a>
         <a href="/dashboard/providers" class="{{if eq .Active "providers"}}active{{end}}">Providers</a>
+        <a href="/dashboard/failures" class="{{if eq .Active "failures"}}active{{end}}">Failures</a>
         <span class="nav-spacer"></span>
         <button id="languageToggle" class="lang-toggle" type="button">中文</button>
     </nav>

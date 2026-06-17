@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/anomalyco/llm-gateway/config"
+	"github.com/anomalyco/llm-gateway/db"
 )
 
 type openAIUsage struct {
@@ -58,9 +59,9 @@ func (p *Proxy) handleOpenAI(w http.ResponseWriter, r *http.Request, providerNam
 	}
 
 	if isStreamRequest(bodyBytes) {
-		p.proxyOpenAIStream(w, r, providerCfg, upstream, bodyBytes, sessionID, startTime)
+		p.proxyOpenAIStream(w, r, providerName, providerCfg, upstream, bodyBytes, sessionID, startTime)
 	} else {
-		p.proxyOpenAINonStream(w, r, providerCfg, upstream, bodyBytes, sessionID, startTime)
+		p.proxyOpenAINonStream(w, r, providerName, providerCfg, upstream, bodyBytes, sessionID, startTime)
 	}
 }
 
@@ -79,7 +80,7 @@ func (p *Proxy) buildOpenAIRequest(r *http.Request, providerCfg *config.Provider
 	return req, nil
 }
 
-func (p *Proxy) proxyOpenAINonStream(w http.ResponseWriter, r *http.Request, providerCfg *config.ProviderConfig, upstream *url.URL, bodyBytes []byte, sessionID int64, startTime time.Time) {
+func (p *Proxy) proxyOpenAINonStream(w http.ResponseWriter, r *http.Request, providerName string, providerCfg *config.ProviderConfig, upstream *url.URL, bodyBytes []byte, sessionID int64, startTime time.Time) {
 	req, err := p.buildOpenAIRequest(r, providerCfg, upstream, bodyBytes)
 	if err != nil {
 		errMsg := err.Error()
@@ -92,7 +93,18 @@ func (p *Proxy) proxyOpenAINonStream(w http.ResponseWriter, r *http.Request, pro
 	resp, err := p.client.Do(req)
 	if err != nil {
 		errMsg := err.Error()
-		p.db.CompleteSession(sessionID, 0, 0, time.Since(startTime).Milliseconds(), &errMsg)
+		durationMs := time.Since(startTime).Milliseconds()
+		p.db.CompleteSession(sessionID, 0, 0, durationMs, &errMsg)
+		captureRequestLog(p.db, db.RequestLog{
+			SessionID:      sessionID,
+			ProviderName:   providerName,
+			Method:         req.Method,
+			URL:            req.URL.String(),
+			RequestHeaders: serializeHeaders(req.Header),
+			RequestBody:    string(bodyBytes),
+			ResponseBody:   "upstream error: " + errMsg,
+			DurationMs:     durationMs,
+		})
 		slog.Error("upstream request failed", "error", err)
 		http.Error(w, "upstream error", http.StatusBadGateway)
 		return
@@ -108,9 +120,23 @@ func (p *Proxy) proxyOpenAINonStream(w http.ResponseWriter, r *http.Request, pro
 		return
 	}
 
+	durationMs := time.Since(startTime).Milliseconds()
+
 	if resp.StatusCode != http.StatusOK {
 		errMsg := string(respBody)
-		p.db.CompleteSession(sessionID, 0, 0, time.Since(startTime).Milliseconds(), &errMsg)
+		p.db.CompleteSession(sessionID, 0, 0, durationMs, &errMsg)
+		captureRequestLog(p.db, db.RequestLog{
+			SessionID:       sessionID,
+			ProviderName:    providerName,
+			Method:          req.Method,
+			URL:             req.URL.String(),
+			RequestHeaders:  serializeHeaders(req.Header),
+			RequestBody:     string(bodyBytes),
+			ResponseStatus:  resp.StatusCode,
+			ResponseHeaders: serializeHeaders(resp.Header),
+			ResponseBody:    string(respBody),
+			DurationMs:      durationMs,
+		})
 		copyResponseHeaders(w.Header(), resp.Header)
 		w.WriteHeader(resp.StatusCode)
 		w.Write(respBody)
@@ -122,12 +148,23 @@ func (p *Proxy) proxyOpenAINonStream(w http.ResponseWriter, r *http.Request, pro
 		slog.Warn("failed to parse upstream response", "error", err)
 	}
 
-	durationMs := time.Since(startTime).Milliseconds()
 	promptTokens := int64(oaiResp.Usage.PromptTokens)
 	completionTokens := int64(oaiResp.Usage.CompletionTokens)
 
 	p.db.CompleteSession(sessionID, promptTokens, completionTokens, durationMs, nil)
 	p.db.CreateRequest(sessionID, promptTokens, completionTokens, durationMs, nil)
+	captureRequestLog(p.db, db.RequestLog{
+		SessionID:       sessionID,
+		ProviderName:    providerName,
+		Method:          req.Method,
+		URL:             req.URL.String(),
+		RequestHeaders:  serializeHeaders(req.Header),
+		RequestBody:     string(bodyBytes),
+		ResponseStatus:  resp.StatusCode,
+		ResponseHeaders: serializeHeaders(resp.Header),
+		ResponseBody:    string(respBody),
+		DurationMs:      durationMs,
+	})
 
 	copyResponseHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
@@ -147,7 +184,7 @@ func extractModel(body []byte) string {
 	return req.Model
 }
 
-func (p *Proxy) proxyOpenAIStream(w http.ResponseWriter, r *http.Request, providerCfg *config.ProviderConfig, upstream *url.URL, bodyBytes []byte, sessionID int64, startTime time.Time) {
+func (p *Proxy) proxyOpenAIStream(w http.ResponseWriter, r *http.Request, providerName string, providerCfg *config.ProviderConfig, upstream *url.URL, bodyBytes []byte, sessionID int64, startTime time.Time) {
 	req, err := p.buildOpenAIRequest(r, providerCfg, upstream, bodyBytes)
 	if err != nil {
 		errMsg := err.Error()
@@ -160,7 +197,18 @@ func (p *Proxy) proxyOpenAIStream(w http.ResponseWriter, r *http.Request, provid
 	resp, err := p.client.Do(req)
 	if err != nil {
 		errMsg := err.Error()
-		p.db.CompleteSession(sessionID, 0, 0, time.Since(startTime).Milliseconds(), &errMsg)
+		durationMs := time.Since(startTime).Milliseconds()
+		p.db.CompleteSession(sessionID, 0, 0, durationMs, &errMsg)
+		captureRequestLog(p.db, db.RequestLog{
+			SessionID:      sessionID,
+			ProviderName:   providerName,
+			Method:         req.Method,
+			URL:            req.URL.String(),
+			RequestHeaders: serializeHeaders(req.Header),
+			RequestBody:    string(bodyBytes),
+			ResponseBody:   "upstream error: " + errMsg,
+			DurationMs:     durationMs,
+		})
 		slog.Error("upstream request failed", "error", err)
 		http.Error(w, "upstream error", http.StatusBadGateway)
 		return
@@ -173,7 +221,20 @@ func (p *Proxy) proxyOpenAIStream(w http.ResponseWriter, r *http.Request, provid
 		if readErr == nil {
 			errMsg = string(body)
 		}
-		p.db.CompleteSession(sessionID, 0, 0, time.Since(startTime).Milliseconds(), &errMsg)
+		durationMs := time.Since(startTime).Milliseconds()
+		p.db.CompleteSession(sessionID, 0, 0, durationMs, &errMsg)
+		captureRequestLog(p.db, db.RequestLog{
+			SessionID:       sessionID,
+			ProviderName:    providerName,
+			Method:          req.Method,
+			URL:             req.URL.String(),
+			RequestHeaders:  serializeHeaders(req.Header),
+			RequestBody:     string(bodyBytes),
+			ResponseStatus:  resp.StatusCode,
+			ResponseHeaders: serializeHeaders(resp.Header),
+			ResponseBody:    string(body),
+			DurationMs:      durationMs,
+		})
 		copyResponseHeaders(w.Header(), resp.Header)
 		w.WriteHeader(resp.StatusCode)
 		w.Write(body)
@@ -196,6 +257,7 @@ func (p *Proxy) proxyOpenAIStream(w http.ResponseWriter, r *http.Request, provid
 	const bufSize = 4096
 	var promptTokens, completionTokens int64
 	var leftover string
+	var capturedBody strings.Builder
 	buf := make([]byte, bufSize)
 	for {
 		n, readErr := resp.Body.Read(buf)
@@ -204,6 +266,15 @@ func (p *Proxy) proxyOpenAIStream(w http.ResponseWriter, r *http.Request, provid
 				break
 			}
 			flusher.Flush()
+
+			if capturedBody.Len() < maxLoggedBodyBytes {
+				remaining := maxLoggedBodyBytes - capturedBody.Len()
+				if n <= remaining {
+					capturedBody.Write(buf[:n])
+				} else {
+					capturedBody.Write(buf[:remaining])
+				}
+			}
 
 			data := leftover + string(buf[:n])
 			lines := strings.Split(data, "\n")
@@ -239,6 +310,18 @@ func (p *Proxy) proxyOpenAIStream(w http.ResponseWriter, r *http.Request, provid
 	durationMs := time.Since(startTime).Milliseconds()
 	p.db.CompleteSession(sessionID, promptTokens, completionTokens, durationMs, nil)
 	p.db.CreateRequest(sessionID, promptTokens, completionTokens, durationMs, nil)
+	captureRequestLog(p.db, db.RequestLog{
+		SessionID:       sessionID,
+		ProviderName:    providerName,
+		Method:          req.Method,
+		URL:             req.URL.String(),
+		RequestHeaders:  serializeHeaders(req.Header),
+		RequestBody:     string(bodyBytes),
+		ResponseStatus:  resp.StatusCode,
+		ResponseHeaders: serializeHeaders(resp.Header),
+		ResponseBody:    capturedBody.String(),
+		DurationMs:      durationMs,
+	})
 }
 
 func isStreamRequest(body []byte) bool {

@@ -3,6 +3,9 @@ package db
 import (
 	"database/sql"
 	"errors"
+	"math"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -36,6 +39,25 @@ type Request struct {
 	CreatedAt        string  `json:"created_at"`
 }
 
+type RequestLog struct {
+	ID              int64  `json:"id"`
+	SessionID       int64  `json:"session_id"`
+	ProviderName    string `json:"provider_name"`
+	Method          string `json:"method"`
+	URL             string `json:"url"`
+	RequestHeaders  string `json:"request_headers"`
+	RequestBody     string `json:"request_body"`
+	ResponseStatus  int    `json:"response_status"`
+	ResponseHeaders string `json:"response_headers"`
+	ResponseBody    string `json:"response_body"`
+	DurationMs      int64  `json:"duration_ms"`
+	CreatedAt       string `json:"created_at"`
+}
+
+// MaxRequestLogs caps the number of HTTP request/response logs we retain.
+// Older entries are pruned automatically when this limit is exceeded.
+const MaxRequestLogs = 10
+
 type Stats struct {
 	TodayRequests int64 `json:"today_requests"`
 	MonthRequests int64 `json:"month_requests"`
@@ -59,10 +81,98 @@ type ProviderStats struct {
 	AvgDurationMs float64 `json:"avg_duration_ms"`
 }
 
+type ProviderAnalytics struct {
+	ProviderName  string  `json:"provider_name"`
+	RequestCount  int64   `json:"request_count"`
+	TotalTokens   int64   `json:"total_tokens"`
+	AvgDurationMs float64 `json:"avg_duration_ms"`
+	SuccessCount  int64   `json:"success_count"`
+	ErrorCount    int64   `json:"error_count"`
+	SuccessRate   float64 `json:"success_rate"`
+	ErrorRate     float64 `json:"error_rate"`
+}
+
+type ModelAnalytics struct {
+	Model         string  `json:"model"`
+	RequestCount  int64   `json:"request_count"`
+	TotalTokens   int64   `json:"total_tokens"`
+	AvgDurationMs float64 `json:"avg_duration_ms"`
+	SuccessCount  int64   `json:"success_count"`
+	ErrorCount    int64   `json:"error_count"`
+	SuccessRate   float64 `json:"success_rate"`
+	ErrorRate     float64 `json:"error_rate"`
+}
+
+type LatencyAnalytics struct {
+	Name             string  `json:"name"`
+	RequestCount     int64   `json:"request_count"`
+	AvgDurationMs    float64 `json:"avg_duration_ms"`
+	MedianDurationMs int64   `json:"median_duration_ms"`
+	P95DurationMs    int64   `json:"p95_duration_ms"`
+	P99DurationMs    int64   `json:"p99_duration_ms"`
+}
+
+type OverviewStats struct {
+	TotalRequests int64   `json:"total_requests"`
+	TotalSessions int64   `json:"total_sessions"`
+	TotalTokens   int64   `json:"total_tokens"`
+	SuccessCount  int64   `json:"success_count"`
+	ErrorCount    int64   `json:"error_count"`
+	SuccessRate   float64 `json:"success_rate"`
+	AvgDurationMs float64 `json:"avg_duration_ms"`
+	P95DurationMs int64   `json:"p95_duration_ms"`
+}
+
+type FailureAnalytics struct {
+	TotalFailures int64              `json:"total_failures"`
+	Categories    []FailureCategory  `json:"categories"`
+	Providers     []FailureDimension `json:"providers"`
+	Models        []FailureDimension `json:"models"`
+	Recent        []Session          `json:"recent"`
+}
+
+type FailureCategory struct {
+	Category string `json:"category"`
+	Count    int64  `json:"count"`
+}
+
+type FailureDimension struct {
+	Name  string `json:"name"`
+	Count int64  `json:"count"`
+}
+
 type TimeSeriesStats struct {
 	Date         string `json:"date"`
 	RequestCount int64  `json:"request_count"`
 	TotalTokens  int64  `json:"total_tokens"`
+}
+
+type AnalyticsRange struct {
+	Value string
+	Days  int
+}
+
+func ParseAnalyticsRange(raw string) AnalyticsRange {
+	switch raw {
+	case "24h":
+		return AnalyticsRange{Value: "24h", Days: 1}
+	case "30d":
+		return AnalyticsRange{Value: "30d", Days: 30}
+	case "90d":
+		return AnalyticsRange{Value: "90d", Days: 90}
+	case "7d", "":
+		return AnalyticsRange{Value: "7d", Days: 7}
+	default:
+		return AnalyticsRange{Value: "7d", Days: 7}
+	}
+}
+
+func (r AnalyticsRange) StartTime(now time.Time) time.Time {
+	if r.Value == "24h" {
+		return now.Add(-24 * time.Hour)
+	}
+	start := now.AddDate(0, 0, -(r.Days - 1))
+	return time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, start.Location())
 }
 
 func (d *DB) EnsureProvider(name string) (int64, error) {
@@ -239,6 +349,287 @@ func (d *DB) GetProviderStats() ([]ProviderStats, error) {
 	return stats, nil
 }
 
+func (d *DB) GetOverviewStats(rawRange string) (*OverviewStats, error) {
+	r := ParseAnalyticsRange(rawRange)
+	start := r.StartTime(time.Now()).Format("2006-01-02 15:04:05")
+	rows, err := d.conn.Query(
+		`SELECT status, prompt_tokens, completion_tokens, duration_ms
+		 FROM sessions
+		 WHERE datetime(started_at) >= datetime(?)`, start,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	overview := &OverviewStats{}
+	var successDurations []int64
+	var successDurationTotal int64
+	for rows.Next() {
+		var status string
+		var promptTokens, completionTokens, durationMs int64
+		if err := rows.Scan(&status, &promptTokens, &completionTokens, &durationMs); err != nil {
+			return nil, err
+		}
+		overview.TotalSessions++
+		overview.TotalRequests++
+		overview.TotalTokens += promptTokens + completionTokens
+		if status == "success" {
+			overview.SuccessCount++
+			successDurations = append(successDurations, durationMs)
+			successDurationTotal += durationMs
+		} else if status == "error" {
+			overview.ErrorCount++
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if overview.TotalSessions > 0 {
+		overview.SuccessRate = float64(overview.SuccessCount) / float64(overview.TotalSessions)
+	}
+	if len(successDurations) > 0 {
+		sort.Slice(successDurations, func(i, j int) bool { return successDurations[i] < successDurations[j] })
+		overview.AvgDurationMs = float64(successDurationTotal) / float64(len(successDurations))
+		overview.P95DurationMs = percentileDuration(successDurations, 0.95)
+	}
+	return overview, nil
+}
+
+func (d *DB) GetFailureAnalytics(rawRange string) (*FailureAnalytics, error) {
+	r := ParseAnalyticsRange(rawRange)
+	start := r.StartTime(time.Now()).Format("2006-01-02 15:04:05")
+	rows, err := d.conn.Query(
+		`SELECT s.id, s.provider_id, p.name, s.model, s.status, s.started_at, s.ended_at,
+		        s.prompt_tokens, s.completion_tokens, s.duration_ms, s.error_message
+		 FROM sessions s JOIN providers p ON s.provider_id = p.id
+		 WHERE s.status = 'error' AND datetime(s.started_at) >= datetime(?)
+		 ORDER BY s.started_at DESC`, start,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	analytics := &FailureAnalytics{}
+	categories := map[string]int64{}
+	providers := map[string]int64{}
+	models := map[string]int64{}
+	for rows.Next() {
+		var s Session
+		if err := rows.Scan(&s.ID, &s.ProviderID, &s.ProviderName, &s.Model, &s.Status, &s.StartedAt, &s.EndedAt, &s.PromptTokens, &s.CompletionTokens, &s.DurationMs, &s.ErrorMessage); err != nil {
+			return nil, err
+		}
+		analytics.TotalFailures++
+		categories[classifyError(s.ErrorMessage)]++
+		providers[s.ProviderName]++
+		models[s.Model]++
+		if len(analytics.Recent) < 20 {
+			analytics.Recent = append(analytics.Recent, s)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	analytics.Categories = failureCategories(categories)
+	analytics.Providers = failureDimensions(providers)
+	analytics.Models = failureDimensions(models)
+	return analytics, nil
+}
+
+func classifyError(message *string) string {
+	if message == nil {
+		return "unknown"
+	}
+	m := strings.ToLower(*message)
+	if strings.Contains(m, "timeout") || strings.Contains(m, "deadline") {
+		return "timeout"
+	}
+	if strings.Contains(m, "connection") || strings.Contains(m, "refused") || strings.Contains(m, "network") || strings.Contains(m, "no such host") {
+		return "network_error"
+	}
+	if strings.Contains(m, "500") || strings.Contains(m, "502") || strings.Contains(m, "503") || strings.Contains(m, "504") || strings.Contains(m, "5xx") {
+		return "upstream_5xx"
+	}
+	if strings.Contains(m, "400") || strings.Contains(m, "401") || strings.Contains(m, "403") || strings.Contains(m, "404") || strings.Contains(m, "429") || strings.Contains(m, "4xx") {
+		return "upstream_4xx"
+	}
+	return "unknown"
+}
+
+func failureCategories(counts map[string]int64) []FailureCategory {
+	categories := make([]FailureCategory, 0, len(counts))
+	for category, count := range counts {
+		categories = append(categories, FailureCategory{Category: category, Count: count})
+	}
+	sort.Slice(categories, func(i, j int) bool {
+		if categories[i].Count == categories[j].Count {
+			return categories[i].Category < categories[j].Category
+		}
+		return categories[i].Count > categories[j].Count
+	})
+	return categories
+}
+
+func failureDimensions(counts map[string]int64) []FailureDimension {
+	dimensions := make([]FailureDimension, 0, len(counts))
+	for name, count := range counts {
+		dimensions = append(dimensions, FailureDimension{Name: name, Count: count})
+	}
+	sort.Slice(dimensions, func(i, j int) bool {
+		if dimensions[i].Count == dimensions[j].Count {
+			return dimensions[i].Name < dimensions[j].Name
+		}
+		return dimensions[i].Count > dimensions[j].Count
+	})
+	return dimensions
+}
+
+func (d *DB) GetLatencyAnalytics(rawRange, by string) ([]LatencyAnalytics, error) {
+	r := ParseAnalyticsRange(rawRange)
+	start := r.StartTime(time.Now()).Format("2006-01-02 15:04:05")
+	selectExpr := "p.name"
+	joinExpr := "JOIN providers p ON s.provider_id = p.id"
+	if by == "model" {
+		selectExpr = "s.model"
+		joinExpr = ""
+	}
+	rows, err := d.conn.Query(
+		`SELECT `+selectExpr+`, s.duration_ms
+		 FROM sessions s `+joinExpr+`
+		 WHERE s.status = 'success' AND datetime(s.started_at) >= datetime(?)
+		 ORDER BY s.duration_ms ASC`, start,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	grouped := map[string][]int64{}
+	for rows.Next() {
+		var name string
+		var duration int64
+		if err := rows.Scan(&name, &duration); err != nil {
+			return nil, err
+		}
+		grouped[name] = append(grouped[name], duration)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	analytics := make([]LatencyAnalytics, 0, len(grouped))
+	for name, durations := range grouped {
+		sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
+		var total int64
+		for _, duration := range durations {
+			total += duration
+		}
+		analytics = append(analytics, LatencyAnalytics{
+			Name:             name,
+			RequestCount:     int64(len(durations)),
+			AvgDurationMs:    float64(total) / float64(len(durations)),
+			MedianDurationMs: percentileDuration(durations, 0.5),
+			P95DurationMs:    percentileDuration(durations, 0.95),
+			P99DurationMs:    percentileDuration(durations, 0.99),
+		})
+	}
+	sort.Slice(analytics, func(i, j int) bool {
+		if analytics[i].P95DurationMs == analytics[j].P95DurationMs {
+			return analytics[i].Name < analytics[j].Name
+		}
+		return analytics[i].P95DurationMs > analytics[j].P95DurationMs
+	})
+	return analytics, nil
+}
+
+func percentileDuration(values []int64, p float64) int64 {
+	if len(values) == 0 {
+		return 0
+	}
+	idx := int(math.Ceil(p*float64(len(values)))) - 1
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= len(values) {
+		idx = len(values) - 1
+	}
+	return values[idx]
+}
+
+func (d *DB) GetProviderAnalytics(rawRange string) ([]ProviderAnalytics, error) {
+	r := ParseAnalyticsRange(rawRange)
+	start := r.StartTime(time.Now()).Format("2006-01-02 15:04:05")
+	rows, err := d.conn.Query(
+		`SELECT p.name, COUNT(*) as cnt,
+		        COALESCE(SUM(s.prompt_tokens + s.completion_tokens), 0) as total_tokens,
+		        COALESCE(AVG(s.duration_ms), 0) as avg_duration,
+		        SUM(CASE WHEN s.status = 'success' THEN 1 ELSE 0 END) as success_count,
+		        SUM(CASE WHEN s.status = 'error' THEN 1 ELSE 0 END) as error_count
+		 FROM sessions s JOIN providers p ON s.provider_id = p.id
+		 WHERE datetime(s.started_at) >= datetime(?)
+		 GROUP BY p.name ORDER BY total_tokens DESC, cnt DESC`, start,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var analytics []ProviderAnalytics
+	for rows.Next() {
+		var s ProviderAnalytics
+		if err := rows.Scan(&s.ProviderName, &s.RequestCount, &s.TotalTokens, &s.AvgDurationMs, &s.SuccessCount, &s.ErrorCount); err != nil {
+			return nil, err
+		}
+		if s.RequestCount > 0 {
+			s.SuccessRate = float64(s.SuccessCount) / float64(s.RequestCount)
+			s.ErrorRate = float64(s.ErrorCount) / float64(s.RequestCount)
+		}
+		analytics = append(analytics, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return analytics, nil
+}
+
+func (d *DB) GetModelAnalytics(rawRange string) ([]ModelAnalytics, error) {
+	r := ParseAnalyticsRange(rawRange)
+	start := r.StartTime(time.Now()).Format("2006-01-02 15:04:05")
+	rows, err := d.conn.Query(
+		`SELECT COALESCE(NULLIF(s.model, ''), 'unknown') as model, COUNT(*) as cnt,
+		        COALESCE(SUM(s.prompt_tokens + s.completion_tokens), 0) as total_tokens,
+		        COALESCE(AVG(s.duration_ms), 0) as avg_duration,
+		        COALESCE(SUM(CASE WHEN s.status = 'success' THEN 1 ELSE 0 END), 0) as success_count,
+		        COALESCE(SUM(CASE WHEN s.status = 'error' THEN 1 ELSE 0 END), 0) as error_count
+		 FROM sessions s
+		 WHERE datetime(s.started_at) >= datetime(?)
+		 GROUP BY COALESCE(NULLIF(s.model, ''), 'unknown') ORDER BY total_tokens DESC, cnt DESC`, start,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var analytics []ModelAnalytics
+	for rows.Next() {
+		var s ModelAnalytics
+		if err := rows.Scan(&s.Model, &s.RequestCount, &s.TotalTokens, &s.AvgDurationMs, &s.SuccessCount, &s.ErrorCount); err != nil {
+			return nil, err
+		}
+		if s.RequestCount > 0 {
+			s.SuccessRate = float64(s.SuccessCount) / float64(s.RequestCount)
+			s.ErrorRate = float64(s.ErrorCount) / float64(s.RequestCount)
+		}
+		analytics = append(analytics, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return analytics, nil
+}
+
 func (d *DB) GetTimeSeriesStats(days int) ([]TimeSeriesStats, error) {
 	if days <= 0 {
 		days = 7
@@ -246,12 +637,19 @@ func (d *DB) GetTimeSeriesStats(days int) ([]TimeSeriesStats, error) {
 	if days > 90 {
 		days = 90
 	}
+	return d.getTimeSeriesStats(AnalyticsRange{Value: "custom", Days: days})
+}
 
+func (d *DB) GetTimeSeriesStatsForRange(rawRange string) ([]TimeSeriesStats, error) {
+	return d.getTimeSeriesStats(ParseAnalyticsRange(rawRange))
+}
+
+func (d *DB) getTimeSeriesStats(r AnalyticsRange) ([]TimeSeriesStats, error) {
 	today := time.Now()
-	start := today.AddDate(0, 0, -(days - 1))
-	byDate := make(map[string]TimeSeriesStats, days)
-	stats := make([]TimeSeriesStats, 0, days)
-	for i := 0; i < days; i++ {
+	start := today.AddDate(0, 0, -(r.Days - 1))
+	byDate := make(map[string]TimeSeriesStats, r.Days)
+	stats := make([]TimeSeriesStats, 0, r.Days)
+	for i := 0; i < r.Days; i++ {
 		date := start.AddDate(0, 0, i).Format("2006-01-02")
 		stat := TimeSeriesStats{Date: date}
 		byDate[date] = stat
@@ -285,4 +683,80 @@ func (d *DB) GetTimeSeriesStats(days int) ([]TimeSeriesStats, error) {
 		stats[i] = byDate[stats[i].Date]
 	}
 	return stats, nil
+}
+
+// InsertRequestLog stores a captured HTTP request/response pair and prunes the
+// table to retain only the most recent MaxRequestLogs rows.
+func (d *DB) InsertRequestLog(log RequestLog) (int64, error) {
+	res, err := d.conn.Exec(
+		`INSERT INTO request_logs
+		 (session_id, provider_name, method, url, request_headers, request_body,
+		  response_status, response_headers, response_body, duration_ms, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+		log.SessionID, log.ProviderName, log.Method, log.URL,
+		log.RequestHeaders, log.RequestBody,
+		log.ResponseStatus, log.ResponseHeaders, log.ResponseBody,
+		log.DurationMs,
+	)
+	if err != nil {
+		return 0, err
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	if _, err := d.conn.Exec(
+		`DELETE FROM request_logs WHERE id NOT IN (
+			SELECT id FROM request_logs ORDER BY id DESC LIMIT ?
+		)`, MaxRequestLogs,
+	); err != nil {
+		return id, err
+	}
+	return id, nil
+}
+
+func (d *DB) GetRequestLogBySession(sessionID int64) (*RequestLog, error) {
+	log := &RequestLog{}
+	err := d.conn.QueryRow(
+		`SELECT id, session_id, provider_name, method, url,
+		        request_headers, request_body,
+		        response_status, response_headers, response_body,
+		        duration_ms, created_at
+		 FROM request_logs WHERE session_id = ?
+		 ORDER BY id DESC LIMIT 1`, sessionID,
+	).Scan(&log.ID, &log.SessionID, &log.ProviderName, &log.Method, &log.URL,
+		&log.RequestHeaders, &log.RequestBody,
+		&log.ResponseStatus, &log.ResponseHeaders, &log.ResponseBody,
+		&log.DurationMs, &log.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return log, nil
+}
+
+func (d *DB) ListRecentRequestLogs() ([]RequestLog, error) {
+	rows, err := d.conn.Query(
+		`SELECT id, session_id, provider_name, method, url,
+		        request_headers, request_body,
+		        response_status, response_headers, response_body,
+		        duration_ms, created_at
+		 FROM request_logs ORDER BY id DESC LIMIT ?`, MaxRequestLogs,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var logs []RequestLog
+	for rows.Next() {
+		var l RequestLog
+		if err := rows.Scan(&l.ID, &l.SessionID, &l.ProviderName, &l.Method, &l.URL,
+			&l.RequestHeaders, &l.RequestBody,
+			&l.ResponseStatus, &l.ResponseHeaders, &l.ResponseBody,
+			&l.DurationMs, &l.CreatedAt); err != nil {
+			return nil, err
+		}
+		logs = append(logs, l)
+	}
+	return logs, rows.Err()
 }

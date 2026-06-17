@@ -85,6 +85,21 @@ func (d *DB) migrate() error {
 			error_message TEXT,
 			created_at TEXT NOT NULL DEFAULT (datetime('now'))
 		)`},
+		{4, `CREATE TABLE IF NOT EXISTS request_logs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			session_id INTEGER NOT NULL REFERENCES sessions(id),
+			provider_name TEXT NOT NULL DEFAULT '',
+			method TEXT NOT NULL DEFAULT '',
+			url TEXT NOT NULL DEFAULT '',
+			request_headers TEXT NOT NULL DEFAULT '',
+			request_body TEXT NOT NULL DEFAULT '',
+			response_status INTEGER NOT NULL DEFAULT 0,
+			response_headers TEXT NOT NULL DEFAULT '',
+			response_body TEXT NOT NULL DEFAULT '',
+			duration_ms INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL DEFAULT (datetime('now'))
+		)`},
+		{5, `CREATE INDEX IF NOT EXISTS idx_request_logs_session ON request_logs(session_id)`},
 	}
 
 	sort.Slice(migrations, func(i, j int) bool {

@@ -68,6 +68,7 @@ func newWithOptions(database *db.DB, options Options) *Handler {
 		"session_detail": template.Must(template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/layout.html", "templates/session_detail.html")),
 		"models":         template.Must(template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/layout.html", "templates/models.html")),
 		"providers":      template.Must(template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/layout.html", "templates/providers.html")),
+		"failures":       template.Must(template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/layout.html", "templates/failures.html")),
 	}
 	providerListCommand := options.ProviderListCommand
 	if providerListCommand == nil {
@@ -106,6 +107,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if path == "providers" {
 		h.providers(w, r)
+		return
+	}
+
+	if path == "failures" {
+		h.failures(w, r)
 		return
 	}
 
@@ -154,6 +160,10 @@ func (h *Handler) models(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) providers(w http.ResponseWriter, r *http.Request) {
 	h.render(w, "providers", pageData{Active: "providers"})
+}
+
+func (h *Handler) failures(w http.ResponseWriter, r *http.Request) {
+	h.render(w, "failures", pageData{Active: "failures"})
 }
 
 func (h *Handler) render(w http.ResponseWriter, name string, data pageData) {
@@ -387,6 +397,9 @@ func providerStatuses(cfg map[string]any, providerList []providerListEntry, gate
 			cfgID, ok = configLookup[slugify(entry.Name)]
 		}
 		if !ok {
+			cfgID, ok = configLookup[canonicalProviderID(entry.Name)]
+		}
+		if !ok {
 			continue
 		}
 		raw := providers[cfgID]
@@ -480,7 +493,7 @@ func parseProviderList(output []byte) []providerListEntry {
 			if name == "" {
 				name = fields[0]
 			}
-			id := slugify(name)
+			id := canonicalProviderID(name)
 			rows = append(rows, providerListEntry{ID: id, Name: name})
 		}
 	}
@@ -489,6 +502,26 @@ func parseProviderList(output []byte) []providerListEntry {
 
 func slugify(s string) string {
 	return strings.ToLower(strings.ReplaceAll(strings.TrimSpace(s), " ", "-"))
+}
+
+// providerDisplayAliases maps human-readable provider names emitted by
+// `opencode providers list` to the canonical provider id used in the opencode
+// config (and gateway config.yaml). The TUI prints display names like
+// "OpenCode Zen" or "GitHub Copilot" while the underlying config keys are
+// "opencode" / "github-copilot". Without this mapping the dashboard cannot
+// match list entries with configured providers, so the gateway-enabled badge
+// stays off even when forwarding is correctly configured.
+var providerDisplayAliases = map[string]string{
+	"opencode zen":   "opencode",
+	"github copilot": "github-copilot",
+}
+
+func canonicalProviderID(name string) string {
+	key := strings.ToLower(strings.TrimSpace(name))
+	if id, ok := providerDisplayAliases[key]; ok {
+		return id
+	}
+	return slugify(name)
 }
 
 func stripANSICodes(s string) string {
