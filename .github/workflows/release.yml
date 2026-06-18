@@ -75,16 +75,28 @@ jobs:
 
   update-homebrew-tap:
     needs: release
-    if: ${{ secrets.HOMEBREW_TAP_TOKEN != '' }}
     runs-on: ubuntu-latest
     steps:
+      - name: Check whether tap token is configured
+        id: tap_token
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "$HOMEBREW_TAP_TOKEN" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v4
+        if: steps.tap_token.outputs.configured == 'true'
         with:
           repository: jachy-h/homebrew-umbra-gate
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: tap
 
       - name: Download release checksums
+        if: steps.tap_token.outputs.configured == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -92,6 +104,7 @@ jobs:
           gh release download "${GITHUB_REF_NAME}" --repo jachy-h/umbra-gate --pattern sha256sums.txt --dir dist
 
       - name: Update formula
+        if: steps.tap_token.outputs.configured == 'true'
         env:
           VERSION: ${{ needs.release.outputs.version }}
         run: |
@@ -107,6 +120,7 @@ jobs:
           perl -0pi -e 's#sha256 ".*?"\n  end#sha256 "'"$AMD_SHA"'"\n  end#' "$FORMULA"
 
       - name: Commit and push formula update
+        if: steps.tap_token.outputs.configured == 'true'
         run: |
           set -euo pipefail
           cd tap
