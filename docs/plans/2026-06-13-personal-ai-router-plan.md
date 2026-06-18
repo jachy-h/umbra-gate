@@ -8,7 +8,7 @@
 
 **Tech Stack:** Go 1.22+, `gopkg.in/yaml.v3`, `modernc.org/sqlite`, `net/http`, `html/template`, `log/slog`
 
-**Design doc:** `docs/plans/2026-06-13-personal-ai-router-design.md`
+**Design doc:** `docs/plans/2026-06-13-umbragate-design.md`
 
 ---
 
@@ -30,7 +30,7 @@
 
 **Step 1: Initialize Go module**
 
-Run: `go mod init github.com/anomalyco/llm-gateway`
+Run: `go mod init github.com/jachy-h/umbra-gate`
 Expected: Creates `go.mod`
 
 **Step 2: Create default config.yaml**
@@ -141,7 +141,7 @@ import (
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo})))
-	slog.Info("starting personal-ai-router")
+	slog.Info("starting umbragate")
 
 	// TODO: load config, init db, start server
 }
@@ -463,8 +463,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/anomalyco/llm-gateway/config"
-	"github.com/anomalyco/llm-gateway/db"
+	"github.com/jachy-h/umbra-gate/config"
+	"github.com/jachy-h/umbra-gate/db"
 )
 
 type Proxy struct {
@@ -540,7 +540,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/anomalyco/llm-gateway/config"
+	"github.com/jachy-h/umbra-gate/config"
 )
 
 type openAIUsage struct {
@@ -692,11 +692,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/anomalyco/llm-gateway/api"
-	"github.com/anomalyco/llm-gateway/config"
-	"github.com/anomalyco/llm-gateway/dashboard"
-	"github.com/anomalyco/llm-gateway/db"
-	"github.com/anomalyco/llm-gateway/proxy"
+	"github.com/jachy-h/umbra-gate/api"
+	"github.com/jachy-h/umbra-gate/config"
+	"github.com/jachy-h/umbra-gate/dashboard"
+	"github.com/jachy-h/umbra-gate/db"
+	"github.com/jachy-h/umbra-gate/proxy"
 )
 
 func main() {
@@ -769,7 +769,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/anomalyco/llm-gateway/db"
+	"github.com/jachy-h/umbra-gate/db"
 )
 
 type Handler struct {
@@ -1145,7 +1145,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/anomalyco/llm-gateway/db"
+	"github.com/jachy-h/umbra-gate/db"
 )
 
 //go:embed templates/*
@@ -1369,7 +1369,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anomalyco/llm-gateway/config"
+	"github.com/jachy-h/umbra-gate/config"
 )
 
 type anthropicUsage struct {
@@ -1604,7 +1604,7 @@ func TestProxyUnknownProvider(t *testing.T) {
 }
 ```
 
-Add `"github.com/anomalyco/llm-gateway/config"` to imports.
+Add `"github.com/jachy-h/umbra-gate/config"` to imports.
 
 **Step 2: Run test**
 
@@ -1623,12 +1623,12 @@ git add proxy/proxy_test.go && git commit -m "test: add basic proxy routing test
 
 **Step 1: Build the binary**
 
-Run: `go build -o personal-ai-router .`
-Expected: Creates `personal-ai-router` binary
+Run: `go build -o umbragate .`
+Expected: Creates `umbragate` binary
 
 **Step 2: Verify binary runs**
 
-Run: `./personal-ai-router 2>&1 &; sleep 1; curl -s http://127.0.0.1:4141/dashboard | head -5; kill %1 2>/dev/null`
+Run: `./umbragate 2>&1 &; sleep 1; curl -s http://127.0.0.1:4141/dashboard | head -5; kill %1 2>/dev/null`
 Expected: HTML output from dashboard
 
 **Step 3: Commit**

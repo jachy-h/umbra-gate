@@ -1,4 +1,4 @@
-# Personal AI Router — Developer Guide
+# Umbragate Developer Guide
 
 ## Architecture
 
@@ -62,7 +62,7 @@ Client ──► 127.0.0.1:4141 ──► ServeMux
 ## Building
 
 ```bash
-go build -o personal-ai-router .
+go build -o umbragate .
 ```
 
 Single binary, no runtime dependencies.
@@ -77,11 +77,11 @@ Tests use `httptest` for proxy routing validation, no real upstream needed.
 
 ## Configuration
 
-Config is loaded from `config.yaml` in the working directory. All providers are optional — add only what you need.
+Config is loaded from `UMBRAGATE_HOME/config.yaml` when `UMBRAGATE_HOME` is set, otherwise from `./config.yaml` if present in the working directory, otherwise from `~/.umbragate/config.yaml`. On startup the app also creates `~/.umbragate/config.example.yaml` when missing. All providers are optional — add only what you need.
 
 ## Database
 
-- Auto-created SQLite file (`router.db`)
+- Auto-created SQLite file (`router.db`) in the same app directory as `config.yaml`
 - Migrations applied on startup via `schema_migrations` table
 - Foreign keys enforced (PRAGMA)
 - WAL mode enabled for concurrent access

@@ -1,4 +1,4 @@
-# Personal AI Router
+# Umbragate
 
 Local-first LLM gateway. It sits between AI clients and model providers, records usage locally, and exposes a built-in dashboard.
 
@@ -14,12 +14,12 @@ Local-first LLM gateway. It sits between AI clients and model providers, records
 
 ```bash
 git clone git@github.com:jachy-h/umbra-gate.git
-cd umbra-gate
+cd umbragate
 cp config.example.yaml config.yaml
 
 export OPENAI_API_KEY=sk-xxxxx
-go build -o personal-ai-router .
-./personal-ai-router
+go build -o umbragate .
+./umbragate
 ```
 
 Then open `http://127.0.0.1:4141/dashboard`.
@@ -30,7 +30,9 @@ For macOS users:
 
 ```bash
 brew tap jachy-h/umbra-gate
-brew install umbra-gate
+brew install umbragate
+umbragate
+cp ~/.umbragate/config.example.yaml ~/.umbragate/config.yaml
 ```
 
 The supported Homebrew path is the tagged release build.
@@ -43,6 +45,14 @@ The supported Homebrew path is the tagged release build.
 ## Configuration
 
 Start from `config.example.yaml` and write your local settings to `config.yaml`.
+
+The runtime looks for `config.yaml` in this order:
+
+1. `UMBRAGATE_HOME/config.yaml` when `UMBRAGATE_HOME` is set
+2. `./config.yaml` in the current working directory
+3. default: `~/.umbragate/config.yaml`
+
+On startup, Umbragate automatically creates `~/.umbragate/` when needed and writes `~/.umbragate/config.example.yaml` if it does not already exist.
 
 Example:
 
@@ -136,13 +146,37 @@ The gateway substitutes the `apiKey` placeholder with the real provider key from
 
 All data is stored locally in `router.db` (SQLite). No cloud dependencies. No telemetry.
 
+The runtime stores both `config.yaml` and `router.db` in the same app directory:
+
+1. `UMBRAGATE_HOME/`
+2. current working directory when `./config.yaml` exists
+3. default: `~/.umbragate/`
+
 Generated local files such as `router.db`, `tmp/`, and backup configs are ignored by git.
+
+If installed with Homebrew and started normally, the default stats database path is:
+`~/.umbragate/router.db`
+
+Default related paths:
+
+- config: `~/.umbragate/config.yaml`
+- config example: `~/.umbragate/config.example.yaml`
+- database: `~/.umbragate/router.db`
+- log: `~/.umbragate/umbragate.log`
+
+Background startup is available with either:
+
+```bash
+umbragate -d
+umbragate daemon
+brew services start umbragate
+```
 
 ## Build And Test
 
 ```bash
 go test ./...
-go build -o personal-ai-router .
+go build -o umbragate .
 ```
 
 ## Install Notes

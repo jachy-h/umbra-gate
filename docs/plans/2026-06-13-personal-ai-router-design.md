@@ -33,7 +33,7 @@ GET  /api/models             ──► JSON API
 
 ## Config File
 
-Located alongside the binary as `config.yaml` (will move to `~/.personal-ai-router/` later).
+Located alongside the binary as `config.yaml` (will move to `~/.umbragate/` later).
 
 ```yaml
 listen: "127.0.0.1:4141"
@@ -256,7 +256,7 @@ llm-gateway/
 - Charts with vanilla JS
 
 ### Phase 4: Polish
-- Config file path migration to `~/.personal-ai-router/`
+- Config file path migration to `~/.umbragate/`
 - Prompt storage toggle
 - Migration mechanism
 - Release build

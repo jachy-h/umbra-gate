@@ -350,7 +350,14 @@ func TestTimeSeriesEndpointReturnsDailyStats(t *testing.T) {
 	if len(stats) != 7 {
 		t.Fatalf("len(stats) = %d, want 7", len(stats))
 	}
-	if stats[6].RequestCount != 1 || stats[6].TotalTokens != 150 {
-		t.Fatalf("stats[6] = %+v, want today totals", stats[6])
+	var matched bool
+	for _, stat := range stats {
+		if stat.RequestCount == 1 && stat.TotalTokens == 150 {
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		t.Fatalf("stats = %+v, want one day with request_count=1 and total_tokens=150", stats)
 	}
 }

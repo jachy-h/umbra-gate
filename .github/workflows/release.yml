@@ -58,29 +58,29 @@ jobs:
           build_archive() {
             local goarch="$1"
             local asset_arch="$2"
-            local archive="umbra-gate_Darwin_${asset_arch}.tar.gz"
+            local archive="umbragate_Darwin_${asset_arch}.tar.gz"
             local root="stage/${asset_arch}"
 
             rm -rf "$root"
             mkdir -p "$root"
 
-            CGO_ENABLED=0 GOOS=darwin GOARCH="$goarch" go build -trimpath -ldflags="-s -w" -o "$root/personal-ai-router" .
+            CGO_ENABLED=0 GOOS=darwin GOARCH="$goarch" go build -trimpath -ldflags="-s -w" -o "$root/umbragate" .
             cp config.example.yaml "$root/config.example.yaml"
-            tar -C "$root" -czf "dist/${archive}" personal-ai-router config.example.yaml
+            tar -C "$root" -czf "dist/${archive}" umbragate config.example.yaml
           }
 
           build_archive arm64 arm64
           build_archive amd64 x86_64
 
-          (cd dist && shasum -a 256 umbra-gate_Darwin_arm64.tar.gz umbra-gate_Darwin_x86_64.tar.gz > sha256sums.txt)
+          (cd dist && shasum -a 256 umbragate_Darwin_arm64.tar.gz umbragate_Darwin_x86_64.tar.gz > sha256sums.txt)
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
           files: |
-            dist/umbra-gate_Darwin_arm64.tar.gz
-            dist/umbra-gate_Darwin_x86_64.tar.gz
+            dist/umbragate_Darwin_arm64.tar.gz
+            dist/umbragate_Darwin_x86_64.tar.gz
             dist/sha256sums.txt
 
   update-homebrew-tap:
@@ -119,13 +119,13 @@ jobs:
           VERSION: ${{ needs.release.outputs.version }}
         run: |
           set -euo pipefail
-          ARM_SHA=$(grep 'umbra-gate_Darwin_arm64.tar.gz' dist/sha256sums.txt | awk '{print $1}')
-          AMD_SHA=$(grep 'umbra-gate_Darwin_x86_64.tar.gz' dist/sha256sums.txt | awk '{print $1}')
-          FORMULA="tap/Formula/umbra-gate.rb"
+          ARM_SHA=$(grep 'umbragate_Darwin_arm64.tar.gz' dist/sha256sums.txt | awk '{print $1}')
+          AMD_SHA=$(grep 'umbragate_Darwin_x86_64.tar.gz' dist/sha256sums.txt | awk '{print $1}')
+          FORMULA="tap/Formula/umbragate.rb"
 
           perl -0pi -e 's/version ".*?"/version "'"$VERSION"'"/' "$FORMULA"
-          perl -0pi -e 's#url ".*/umbra-gate_Darwin_arm64.tar.gz"#url "https://github.com/jachy-h/umbra-gate/releases/download/v'"$VERSION"'/umbra-gate_Darwin_arm64.tar.gz"#' "$FORMULA"
-          perl -0pi -e 's#url ".*/umbra-gate_Darwin_x86_64.tar.gz"#url "https://github.com/jachy-h/umbra-gate/releases/download/v'"$VERSION"'/umbra-gate_Darwin_x86_64.tar.gz"#' "$FORMULA"
+          perl -0pi -e 's#url ".*/umbragate_Darwin_arm64.tar.gz"#url "https://github.com/jachy-h/umbra-gate/releases/download/v'"$VERSION"'/umbragate_Darwin_arm64.tar.gz"#' "$FORMULA"
+          perl -0pi -e 's#url ".*/umbragate_Darwin_x86_64.tar.gz"#url "https://github.com/jachy-h/umbra-gate/releases/download/v'"$VERSION"'/umbragate_Darwin_x86_64.tar.gz"#' "$FORMULA"
           ruby -e '
             formula = File.read(ARGV[0])
             arm_sha = ARGV[1]
@@ -150,6 +150,6 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Formula/umbra-gate.rb
-          git commit -m "chore: update umbra-gate v${{ needs.release.outputs.version }}"
+          git add Formula/umbragate.rb
+          git commit -m "chore: update umbragate v${{ needs.release.outputs.version }}"
           git push
