@@ -145,6 +145,8 @@ brew tap jachy-h/umbra-gate
 brew install umbra-gate
 ```
 
+The supported Homebrew path is the tagged release build. HEAD/source installation is not currently advertised.
+
 Release automation publishes macOS tarballs on tags like `v0.1.0`. If the repository secret `HOMEBREW_TAP_TOKEN` is configured, the release workflow also updates the Homebrew formula SHA256 values automatically.
 
 ## Supported Protocols
