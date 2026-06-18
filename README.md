@@ -136,7 +136,16 @@ go build -o personal-ai-router .
 
 ## Install Notes
 
-There is no one-line installer in this repository yet. For macOS, the safest current path is still `go build` or downloading a signed release artifact once release packaging is added.
+For local development, use `go build`.
+
+For macOS users, Homebrew tap support is prepared via `jachy-h/homebrew-umbra-gate`. Once a tagged release is published, install with:
+
+```bash
+brew tap jachy-h/umbra-gate
+brew install umbra-gate
+```
+
+Release automation publishes macOS tarballs on tags like `v0.1.0`. If the repository secret `HOMEBREW_TAP_TOKEN` is configured, the release workflow also updates the Homebrew formula SHA256 values automatically.
 
 ## Supported Protocols
 

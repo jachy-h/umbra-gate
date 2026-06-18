@@ -1,0 +1,120 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run tests
+        run: go test ./...
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Set release metadata
+        id: meta
+        run: |
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Build release archives
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist stage
+
+          build_archive() {
+            local goarch="$1"
+            local asset_arch="$2"
+            local archive="umbra-gate_Darwin_${asset_arch}.tar.gz"
+            local root="stage/${asset_arch}"
+
+            rm -rf "$root"
+            mkdir -p "$root"
+
+            CGO_ENABLED=0 GOOS=darwin GOARCH="$goarch" go build -trimpath -ldflags="-s -w" -o "$root/personal-ai-router" .
+            cp config.example.yaml "$root/config.example.yaml"
+            tar -C "$root" -czf "dist/${archive}" personal-ai-router config.example.yaml
+          }
+
+          build_archive arm64 arm64
+          build_archive amd64 x86_64
+
+          (cd dist && shasum -a 256 umbra-gate_Darwin_arm64.tar.gz umbra-gate_Darwin_x86_64.tar.gz > sha256sums.txt)
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/umbra-gate_Darwin_arm64.tar.gz
+            dist/umbra-gate_Darwin_x86_64.tar.gz
+            dist/sha256sums.txt
+
+  update-homebrew-tap:
+    needs: release
+    if: ${{ secrets.HOMEBREW_TAP_TOKEN != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: jachy-h/homebrew-umbra-gate
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Download release checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download "${GITHUB_REF_NAME}" --repo jachy-h/umbra-gate --pattern sha256sums.txt --dir dist
+
+      - name: Update formula
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          ARM_SHA=$(grep 'umbra-gate_Darwin_arm64.tar.gz' dist/sha256sums.txt | awk '{print $1}')
+          AMD_SHA=$(grep 'umbra-gate_Darwin_x86_64.tar.gz' dist/sha256sums.txt | awk '{print $1}')
+          FORMULA="tap/Formula/umbra-gate.rb"
+
+          perl -0pi -e 's/version ".*?"/version "'"$VERSION"'"/' "$FORMULA"
+          perl -0pi -e 's#url ".*/umbra-gate_Darwin_arm64.tar.gz"#url "https://github.com/jachy-h/umbra-gate/releases/download/v'"$VERSION"'/umbra-gate_Darwin_arm64.tar.gz"#' "$FORMULA"
+          perl -0pi -e 's#sha256 ".*?"\n    else#sha256 "'"$ARM_SHA"'"\n    else#' "$FORMULA"
+          perl -0pi -e 's#url ".*/umbra-gate_Darwin_x86_64.tar.gz"#url "https://github.com/jachy-h/umbra-gate/releases/download/v'"$VERSION"'/umbra-gate_Darwin_x86_64.tar.gz"#' "$FORMULA"
+          perl -0pi -e 's#sha256 ".*?"\n  end#sha256 "'"$AMD_SHA"'"\n  end#' "$FORMULA"
+
+      - name: Commit and push formula update
+        run: |
+          set -euo pipefail
+          cd tap
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/umbra-gate.rb
+          git commit -m "chore: update umbra-gate ${GITHUB_REF_NAME}"
+          git push
