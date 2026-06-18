@@ -232,5 +232,3 @@ func TestGatewayProvidersDeleteNotFound(t *testing.T) {
 		t.Errorf("status = %d", w.Code)
 	}
 }
-
-
