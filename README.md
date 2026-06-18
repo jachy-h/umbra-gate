@@ -24,6 +24,17 @@ go build -o personal-ai-router .
 
 Then open `http://127.0.0.1:4141/dashboard`.
 
+## Install With Homebrew
+
+For macOS users:
+
+```bash
+brew tap jachy-h/umbra-gate
+brew install umbra-gate
+```
+
+The supported Homebrew path is the tagged release build.
+
 ## Requirements
 
 - Go 1.24+
@@ -137,15 +148,6 @@ go build -o personal-ai-router .
 ## Install Notes
 
 For local development, use `go build`.
-
-For macOS users, Homebrew tap support is prepared via `jachy-h/homebrew-umbra-gate`. Once a tagged release is published, install with:
-
-```bash
-brew tap jachy-h/umbra-gate
-brew install umbra-gate
-```
-
-The supported Homebrew path is the tagged release build. HEAD/source installation is not currently advertised.
 
 Release automation publishes macOS tarballs on tags like `v0.1.0`. If the repository secret `HOMEBREW_TAP_TOKEN` is configured, the release workflow also updates the Homebrew formula SHA256 values automatically.
 
