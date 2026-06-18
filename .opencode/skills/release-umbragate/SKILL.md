@@ -10,11 +10,12 @@ Use this skill when the task is to publish a new Umbragate release from this rep
 ## Repositories
 
 - Main repo: `git@github.com:jachy-h/umbra-gate.git`
-- Homebrew tap: `git@github.com:jachy-h/homebrew-umbra-gate.git`
+- Homebrew tap: `git@github.com:jachy-h/homebrew-umbragate.git`
 
 ## Current naming rules
 
-- GitHub repositories still use `umbra-gate` and `homebrew-umbra-gate`
+- GitHub main repository still uses `umbra-gate`
+- GitHub Homebrew tap repository uses `homebrew-umbragate`
 - Product name, binary name, archive name, and formula name use `umbragate`
 - Formula file: `Formula/umbragate.rb`
 - Release archives:
@@ -96,7 +97,7 @@ Check that the release contains:
 
 ### 6. Verify Homebrew tap update
 
-In `homebrew-umbra-gate`:
+In `homebrew-umbragate`:
 
 1. Pull latest changes
 2. Check `Formula/umbragate.rb`
@@ -125,7 +126,7 @@ git push origin main
 Verify install flow:
 
 ```bash
-brew tap jachy-h/umbra-gate
+brew tap jachy-h/umbragate
 brew install umbragate
 umbragate --help
 ```

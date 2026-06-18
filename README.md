@@ -29,7 +29,8 @@ Then open `http://127.0.0.1:4141/dashboard`.
 For macOS users:
 
 ```bash
-brew tap jachy-h/umbra-gate
+brew tap jachy-h/umbragate
+brew trust --tap jachy-h/umbragate
 brew install umbragate
 umbragate
 cp ~/.umbragate/config.example.yaml ~/.umbragate/config.yaml

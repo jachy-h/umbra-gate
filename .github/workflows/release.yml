@@ -101,7 +101,7 @@ jobs:
       - uses: actions/checkout@v4
         if: steps.tap_token.outputs.configured == 'true'
         with:
-          repository: jachy-h/homebrew-umbra-gate
+          repository: jachy-h/homebrew-umbragate
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: tap
 
