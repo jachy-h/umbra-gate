@@ -10,11 +10,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/anomalyco/llm-gateway/api"
-	"github.com/anomalyco/llm-gateway/config"
-	"github.com/anomalyco/llm-gateway/dashboard"
-	"github.com/anomalyco/llm-gateway/db"
-	"github.com/anomalyco/llm-gateway/proxy"
+	"github.com/jachy-h/umbra-gate/api"
+	"github.com/jachy-h/umbra-gate/config"
+	"github.com/jachy-h/umbra-gate/dashboard"
+	"github.com/jachy-h/umbra-gate/db"
+	"github.com/jachy-h/umbra-gate/proxy"
 )
 
 func main() {

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anomalyco/llm-gateway/config"
-	"github.com/anomalyco/llm-gateway/db"
+	"github.com/jachy-h/umbra-gate/config"
+	"github.com/jachy-h/umbra-gate/db"
 )
 
 type openAIUsage struct {

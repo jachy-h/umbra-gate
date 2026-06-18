@@ -1,4 +1,4 @@
-module github.com/anomalyco/llm-gateway
+module github.com/jachy-h/umbra-gate
 
 go 1.25.0
 

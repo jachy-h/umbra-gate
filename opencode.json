@@ -1,5 +1,11 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "references": {
+    "homebrew-tap": {
+      "path": "../homebrew-umbra-gate",
+      "description": "Use for Homebrew formula, tap repository structure, and release packaging work"
+    }
+  },
   "mcp": {
     "chrome-devtools": {
       "type": "local",

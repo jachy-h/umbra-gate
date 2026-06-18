@@ -14,9 +14,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/anomalyco/llm-gateway/config"
-	"github.com/anomalyco/llm-gateway/db"
-	"github.com/anomalyco/llm-gateway/opencodeconfig"
+	"github.com/jachy-h/umbra-gate/config"
+	"github.com/jachy-h/umbra-gate/db"
+	"github.com/jachy-h/umbra-gate/opencodeconfig"
 )
 
 //go:embed templates/* static/* static/dashboard/*

@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/anomalyco/llm-gateway/config"
+	"github.com/jachy-h/umbra-gate/config"
 )
 
 // gatewayProviderView is the JSON shape returned to clients. The plaintext

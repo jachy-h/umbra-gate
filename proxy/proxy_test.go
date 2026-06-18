@@ -12,8 +12,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/anomalyco/llm-gateway/config"
-	"github.com/anomalyco/llm-gateway/db"
+	"github.com/jachy-h/umbra-gate/config"
+	"github.com/jachy-h/umbra-gate/db"
 )
 
 type capturedRequest struct {

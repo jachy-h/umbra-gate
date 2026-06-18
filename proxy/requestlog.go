@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/anomalyco/llm-gateway/db"
+	"github.com/jachy-h/umbra-gate/db"
 )
 
 // maxLoggedBodyBytes caps the size of any single request or response body we
