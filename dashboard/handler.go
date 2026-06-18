@@ -19,7 +19,7 @@ import (
 	"github.com/anomalyco/llm-gateway/opencodeconfig"
 )
 
-//go:embed templates/*
+//go:embed templates/* static/* static/dashboard/*
 var templateFS embed.FS
 
 type pageData struct {
@@ -84,6 +84,11 @@ func newWithOptions(database *db.DB, options Options) *Handler {
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/dashboard")
 	path = strings.TrimPrefix(path, "/")
+
+	if strings.HasPrefix(path, "static/") {
+		http.StripPrefix("/dashboard/", http.FileServer(http.FS(templateFS))).ServeHTTP(w, r)
+		return
+	}
 
 	if path == "" || path == "/" {
 		h.home(w, r)

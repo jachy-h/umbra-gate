@@ -1,0 +1,10 @@
+listen: 127.0.0.1:4141
+
+providers:
+  openai:
+    type: openai
+    base_url: https://api.openai.com
+    api_key: ${OPENAI_API_KEY}
+
+storage:
+  save_prompt: false

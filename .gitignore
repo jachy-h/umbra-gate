@@ -6,6 +6,7 @@ personal-ai-router
 
 # Local config
 config.yaml
+config.yaml.*.bak
 
 # Database
 router.db
@@ -20,6 +21,10 @@ router.db-*
 .DS_Store
 .idea/
 .vscode/
+
+# Local dev tools
+.air.toml
+tmp/
 
 # Local worktrees
 .worktrees/

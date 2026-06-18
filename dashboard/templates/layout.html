@@ -4,19 +4,21 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Personal AI Router</title>
+    <link rel="icon" href="data:,">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.classless.min.css">
+    <script type="module" src="/dashboard/static/dashboard/header.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        html, body { padding: 0; margin: 0; max-width: none; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #333; }
-        nav { background: #1a1a2e; color: white; padding: 0 24px; display: flex; align-items: center; height: 56px; }
+        html, body { padding: 0; margin: 0; max-width: none; height: 100%; overflow: hidden; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #333; height: 100vh; display: flex; flex-direction: column; }
+        nav { background: #1a1a2e; color: white; padding: 0 24px; display: flex; align-items: center; height: 56px; flex: 0 0 56px; }
         nav a { color: #a0a0c0; text-decoration: none; margin-right: 24px; font-size: 14px; }
         nav a:hover, nav a.active { color: white; }
         nav .brand { font-weight: 700; font-size: 16px; color: white; margin-right: 32px; }
         .nav-spacer { flex: 1; }
         .lang-toggle { border: 1px solid #4b5563; background: transparent; color: white; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 13px; width: auto; }
         .lang-toggle:hover { background: rgba(255,255,255,0.08); }
-        main { max-width: 1120px; margin: 32px auto; padding: 0 24px; }
+        main { width: 100%; max-width: 1120px; margin: 0 auto; padding: 32px 24px; flex: 1 1 auto; overflow: auto; }
         .page-title { margin-bottom: 24px; font-size: 28px; color: #111827; }
         .card { background: white; border-radius: 8px; padding: 24px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
         .card h2 { font-size: 18px; margin-bottom: 16px; color: #1a1a2e; }
@@ -26,17 +28,21 @@
         .stat .label { font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; }
         .stat .value { font-size: 28px; font-weight: 700; color: #111827; margin-top: 4px; }
         .stat-desc { font-size: 11px; color: #9ca3af; margin-top: 4px; line-height:1.4; }
-        .dashboard-stats { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
-        .dashboard-stats .stat { padding: 12px 14px; gap: 10px; }
-        .dashboard-stats .stat .icon { width: 34px; height: 34px; border-radius: 10px; font-size: 16px; }
-        .dashboard-stats .stat .label { font-size: 10px; }
-        .dashboard-stats .stat .value { font-size: 21px; margin-top: 2px; }
-        .dashboard-stats .stat-desc { display: none; }
-        .trend-card { margin-top: 24px; }
-        .analytics-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: -8px 0 16px; flex-wrap: wrap; }
-        .analytics-toolbar label { color: #6b7280; font-size: 13px; font-weight: 600; margin: 0; }
-        .analytics-toolbar select { width: auto; min-width: 120px; margin: 0; }
+        .dashboard-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+        .metric-panel { background: white; border-radius: 12px; padding: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+        .metric-panel-title { color: #6b7280; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 10px; }
+        .metric-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+        .metric-item { min-width: 0; padding: 10px 12px; border-radius: 10px; background: #f9fafb; }
+        .metric-item .label { font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .metric-item .value { font-size: 22px; font-weight: 750; color: #111827; margin-top: 2px; font-variant-numeric: tabular-nums; }
+        .metric-item .stat-desc { display: none; }
+        .trend-card { margin-top: 18px; }
+        .analytics-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: -8px 0 16px; flex-wrap: wrap; }
+        .analytics-toolbar label { color: #6b7280; font-size: 12px; font-weight: 600; margin: 0; white-space: nowrap; }
+        .analytics-toolbar select { width: auto; min-width: 90px; margin: 0; border: 1px solid #e5e7eb; background: #fff; border-radius: 10px; padding: 9px 12px; font-size: 14px; height: 40px; }
+        .analytics-toolbar select:focus { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,0.12); outline: none; }
         .overview-stats { margin-bottom: 24px; }
+        @media (max-width: 720px) { .dashboard-metrics { grid-template-columns: 1fr; } }
         .dashboard-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-top: 24px; }
         .usage-list { display: grid; gap: 14px; }
         .usage-row { display: grid; gap: 6px; }
@@ -45,6 +51,14 @@
         .usage-value { color: #6b7280; white-space: nowrap; }
         .usage-bar { height: 10px; background: #eef2ff; border-radius: 999px; overflow: hidden; }
         .usage-fill { height: 100%; background: linear-gradient(90deg, #4f46e5, #06b6d4); border-radius: inherit; }
+        .stacked-token-chart { display: grid; gap: 14px; }
+        .stacked-token-bar { display: flex; width: 100%; height: 22px; overflow: hidden; border-radius: 999px; background: #eef2ff; box-shadow: inset 0 0 0 1px rgba(79,70,229,0.08); }
+        .stacked-token-segment { height: 100%; min-width: 2px; }
+        .stacked-token-legend { display: grid; gap: 10px; }
+        .stacked-token-row { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; font-size: 13px; }
+        .stacked-token-swatch { width: 12px; height: 12px; border-radius: 4px; }
+        .stacked-token-name { color: #111827; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .stacked-token-value, .stacked-token-share { color: #6b7280; font-variant-numeric: tabular-nums; white-space: nowrap; }
         .empty-state { color: #6b7280; font-size: 14px; padding: 16px 0; }
         table { width: 100%; border-collapse: collapse; margin: 0; }
         th, td { text-align: left; padding: 12px 16px; border-bottom: 1px solid #eee; font-size: 14px; background: transparent; --pico-table-row-stripped-background-color: transparent; }
@@ -61,19 +75,22 @@
         .detail-grid .key { color: #888; font-size: 14px; }
         .detail-grid .val { font-size: 14px; font-weight: 500; }
         code { background: #f3f4f6; padding: 2px 6px; border-radius: 4px; }
+        .vue-ready .vue-fallback { display: none; }
     </style>
 </head>
 <body>
-    <nav>
-        <span class="brand">AI Router</span>
-        <a href="/dashboard" class="{{if eq .Active "home"}}active{{end}}" data-i18n="home">Home</a>
-        <a href="/dashboard/sessions" class="{{if eq .Active "sessions"}}active{{end}}" data-i18n="sessions">Sessions</a>
-        <a href="/dashboard/models" class="{{if eq .Active "models"}}active{{end}}" data-i18n="models">Models</a>
-        <a href="/dashboard/providers" class="{{if eq .Active "providers"}}active{{end}}">Providers</a>
-        <a href="/dashboard/failures" class="{{if eq .Active "failures"}}active{{end}}">Failures</a>
-        <span class="nav-spacer"></span>
-        <button id="languageToggle" class="lang-toggle" type="button">中文</button>
-    </nav>
+    <div id="appHeader" data-active="{{.Active}}">
+        <nav class="vue-fallback">
+            <span class="brand">AI Router</span>
+            <a href="/dashboard" class="{{if eq .Active "home"}}active{{end}}" data-i18n="home">Home</a>
+            <a href="/dashboard/sessions" class="{{if eq .Active "sessions"}}active{{end}}" data-i18n="sessions">Sessions</a>
+            <a href="/dashboard/models" class="{{if eq .Active "models"}}active{{end}}" data-i18n="models">Models</a>
+            <a href="/dashboard/providers" class="{{if eq .Active "providers"}}active{{end}}">Providers</a>
+            <a href="/dashboard/failures" class="{{if eq .Active "failures"}}active{{end}}">Failures</a>
+            <span class="nav-spacer"></span>
+            <button id="languageToggle" class="lang-toggle" type="button">中文</button>
+        </nav>
+    </div>
     <main>
         {{block "content" .}}{{end}}
     </main>

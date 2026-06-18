@@ -1,31 +1,35 @@
 {{define "content"}}
-<h1 class="page-title">Providers</h1>
+<div id="providersApp">
+    <h1 class="page-title">Providers</h1>
 
-<div class="provider-layout">
-    <div class="card">
-        <div class="provider-analytics-header">
-            <h2>Provider Analytics</h2>
-            <select id="providerAnalyticsRange" aria-label="Provider analytics time range">
-                <option value="24h">24h</option>
-                <option value="7d" selected>7d</option>
-                <option value="30d">30d</option>
-                <option value="90d">90d</option>
-            </select>
+    <div class="provider-layout">
+        <div class="card">
+            <div class="provider-analytics-header">
+                <h2>Provider Analytics</h2>
+                <select id="providerAnalyticsRange" v-model="range" @change="loadProviderAnalytics" aria-label="Provider analytics time range">
+                    <option value="24h">24h</option>
+                    <option value="7d">7d</option>
+                    <option value="30d">30d</option>
+                    <option value="90d">90d</option>
+                </select>
+            </div>
+            <div class="provider-charts">
+                <div class="provider-chart"><canvas id="providerTokenChart"></canvas></div>
+                <div class="provider-chart"><canvas id="providerSuccessChart"></canvas></div>
+            </div>
+            <provider-analytics-rows id="providerAnalyticsContainer" :rows="analyticsRows"></provider-analytics-rows>
+            <div class="vue-fallback" id="providerAnalyticsFallback"><div class="empty-state">Loading...</div></div>
         </div>
-        <div class="provider-charts">
-            <div class="provider-chart"><canvas id="providerTokenChart"></canvas></div>
-            <div class="provider-chart"><canvas id="providerSuccessChart"></canvas></div>
-        </div>
-        <div id="providerAnalyticsContainer"><div class="empty-state">Loading...</div></div>
-    </div>
 
-    <div class="card">
-        <div class="provider-analytics-header">
-            <h2>Management</h2>
-            <span class="empty-state" style="padding:0;font-size:13px;">Toggle gateway forwarding per provider</span>
+        <div class="card">
+            <div class="provider-analytics-header">
+                <h2>Management</h2>
+                <span class="empty-state" style="padding:0;font-size:13px;">Toggle gateway forwarding per provider</span>
+            </div>
+            <provider-management-table id="providerTableContainer" :rows="providerRows" :config-path="configPath" @toggle="onToggle"></provider-management-table>
+            <div class="vue-fallback"><div class="empty-state">Loading...</div></div>
+            <div id="globalStatus" class="empty-state" :style="{ minHeight: '20px', marginTop: '8px', color: statusError ? '#c53030' : '#0d7d44' }">{{`{{ status }}`}}</div>
         </div>
-        <div id="providerTableContainer"><div class="empty-state">Loading...</div></div>
-        <div id="globalStatus" class="empty-state" style="min-height:20px;margin-top:8px;"></div>
     </div>
 </div>
 
@@ -56,202 +60,5 @@
 </style>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script>
-let configPath = '';
-let providerTokenChartInstance;
-let providerSuccessChartInstance;
-
-function esc(s) { return String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m]); }
-
-function setStatus(text, isError) {
-    const el = document.getElementById('globalStatus');
-    el.textContent = text || '';
-    el.style.color = isError ? '#c53030' : '#0d7d44';
-    if (text && !isError) setTimeout(() => { if (el.textContent === text) el.textContent = ''; }, 3000);
-}
-
-function buildRows(openRows, gwRows) {
-    const combined = [];
-    openRows.forEach(p => {
-        combined.push({
-            id: p.id, name: p.name, source: 'opencode',
-            built_in: p.built_in, configured: p.configured,
-            gateway_enabled: p.gateway_enabled, hasGw: false, gwType: '', gwBaseUrl: ''
-        });
-    });
-    gwRows.forEach(p => {
-        const existing = combined.find(r => r.id.toLowerCase() === p.id.toLowerCase());
-        if (existing) {
-            existing.hasGw = true;
-            existing.gwType = p.type;
-            existing.gwBaseUrl = p.base_url;
-        } else {
-            combined.push({
-                id: p.id, name: p.id, source: 'gateway', type: p.type,
-                built_in: false, configured: false, gateway_enabled: false,
-                hasGw: true, gwType: p.type, gwBaseUrl: p.base_url
-            });
-        }
-    });
-    return combined;
-}
-
-function renderTable(rows) {
-    const container = document.getElementById('providerTableContainer');
-    if (!rows.length) {
-        container.innerHTML = '<div class="empty-state">No providers available.</div>';
-        return;
-    }
-    const pathHtml = configPath ? `<div class="config-path">writes to: ${esc(configPath)}</div>` : '';
-    container.innerHTML = pathHtml + `<table>
-        <thead><tr><th>Provider</th><th>Status</th><th>Gateway forwarding</th></tr></thead>
-        <tbody>
-        ${rows.map(p => {
-            const tags = [];
-            if (p.built_in) tags.push('<span class="badge badge-success">built-in</span>');
-            if (p.configured) tags.push('<span class="badge badge-success">configured</span>');
-            if (p.hasGw) tags.push('<span class="badge badge-success">gateway upstream</span>');
-            if (!tags.length) tags.push('<span class="badge badge-pending">unconfigured</span>');
-
-            const canToggle = p.source === 'opencode';
-            const gwCell = canToggle
-                ? `<div class="gw-cell">
-                       <label>
-                           <input type="checkbox" role="switch" data-id="${esc(p.id)}" class="gw-switch" ${p.gateway_enabled ? 'checked' : ''}>
-                       </label>
-                       <span class="gw-status ${p.gateway_enabled ? 'on' : ''}">${p.gateway_enabled ? 'On' : 'Off'}</span>
-                   </div>`
-                : `<span class="empty-state" style="padding:0;font-size:13px;">— gateway upstream</span>`;
-
-            return `<tr>
-                <td><strong>${esc(p.name)}</strong>${p.source === 'gateway' ? '<span class="row-source">gateway-only</span>' : ''}</td>
-                <td>${tags.join(' ')}</td>
-                <td>${gwCell}</td>
-            </tr>`;
-        }).join('')}
-        </tbody></table>`;
-
-    container.querySelectorAll('.gw-switch').forEach(input => {
-        input.addEventListener('change', () => onToggle(input));
-    });
-}
-
-function formatNum(n) {
-    if (n >= 1000000) return ((n / 1000000).toFixed(1) + 'M').replace('.0', '');
-    if (n >= 1000) return ((n / 1000).toFixed(1) + 'K').replace('.0', '');
-    return String(n);
-}
-
-function fmtPercent(n) { return `${Math.round((n || 0) * 100)}%`; }
-function fmtDuration(ms) { return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms || 0)}ms`; }
-
-function renderProviderAnalytics(rows) {
-    const container = document.getElementById('providerAnalyticsContainer');
-    if (!Array.isArray(rows) || rows.length === 0) {
-        container.innerHTML = '<div class="empty-state">No provider usage yet.</div>';
-        return;
-    }
-    container.innerHTML = `<div class="provider-analytics-grid">${rows.map(row => `
-        <div class="provider-analytics-row">
-            <div class="provider-analytics-name">${esc(row.provider_name)}</div>
-            <div class="provider-analytics-metric"><div class="provider-analytics-label">Requests</div><div class="provider-analytics-value">${formatNum(row.request_count || 0)}</div></div>
-            <div class="provider-analytics-metric"><div class="provider-analytics-label">Tokens</div><div class="provider-analytics-value">${formatNum(row.total_tokens || 0)}</div></div>
-            <div class="provider-analytics-metric"><div class="provider-analytics-label">Success Rate</div><div class="provider-analytics-value">${fmtPercent(row.success_rate || 0)}</div></div>
-            <div class="provider-analytics-metric"><div class="provider-analytics-label">Avg Latency</div><div class="provider-analytics-value">${fmtDuration(row.avg_duration_ms || 0)}</div></div>
-            <div class="provider-analytics-metric"><div class="provider-analytics-label">Errors</div><div class="provider-analytics-value">${formatNum(row.error_count || 0)}</div></div>
-        </div>
-    `).join('')}</div>`;
-
-    if (window.Chart) {
-        renderProviderTokenChart(rows);
-        renderProviderSuccessChart(rows);
-    }
-}
-
-function renderProviderTokenChart(rows) {
-    if (providerTokenChartInstance) providerTokenChartInstance.destroy();
-    const ctx = document.getElementById('providerTokenChart').getContext('2d');
-    providerTokenChartInstance = new Chart(ctx, {
-        type: 'doughnut',
-        data: {
-            labels: rows.map(r => r.provider_name),
-            datasets: [{ data: rows.map(r => r.total_tokens || 0), backgroundColor: ['#4f46e5','#06b6d4','#10a37f','#d97757','#4285f4','#0866ff','#ff7000','#615ced'], borderColor:'#fff', borderWidth:2 }]
-        },
-        options: { responsive:true, maintainAspectRatio:false, cutout:'58%', plugins:{ legend:{position:'bottom',labels:{boxWidth:10,font:{size:11},padding:12}} } }
-    });
-}
-
-function renderProviderSuccessChart(rows) {
-    if (providerSuccessChartInstance) providerSuccessChartInstance.destroy();
-    const ctx = document.getElementById('providerSuccessChart').getContext('2d');
-    providerSuccessChartInstance = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: rows.map(r => r.provider_name),
-            datasets: [
-                { label:'Success', data:rows.map(r=>r.success_count||0), backgroundColor:'#10a37f' },
-                { label:'Errors', data:rows.map(r=>r.error_count||0), backgroundColor:'#ef4444' }
-            ]
-        },
-        options: { responsive:true, maintainAspectRatio:false, scales:{ x:{stacked:true}, y:{stacked:true,beginAtZero:true,title:{display:true,text:'Requests'}} }, plugins:{ legend:{position:'bottom',labels:{boxWidth:10,font:{size:11},padding:8}} } }
-    });
-}
-
-function loadProviderAnalytics() {
-    const range = document.getElementById('providerAnalyticsRange').value || '7d';
-    fetch(`/api/providers/analytics?range=${encodeURIComponent(range)}`)
-        .then(r => r.ok ? r.json() : Promise.reject(new Error('request failed')))
-        .then(renderProviderAnalytics)
-        .catch(() => {
-            document.getElementById('providerAnalyticsContainer').innerHTML = '<div class="empty-state">Failed to load provider analytics.</div>';
-        });
-}
-
-function onToggle(input) {
-    const id = input.dataset.id;
-    const enabled = input.checked;
-    const status = input.closest('.gw-cell').querySelector('.gw-status');
-    input.disabled = true;
-    status.textContent = enabled ? 'Enabling...' : 'Disabling...';
-    status.classList.remove('on');
-
-    fetch('/dashboard/providers/gateway', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({id, enabled, path: configPath})
-    }).then(r => r.ok ? r.json() : r.json().then(j => Promise.reject(j.error || 'failed')))
-      .then(() => {
-        status.textContent = enabled ? 'On' : 'Off';
-        status.classList.toggle('on', enabled);
-        setStatus(`Gateway ${enabled ? 'enabled' : 'disabled'} for ${id}.`);
-      })
-      .catch(err => {
-        input.checked = !enabled;
-        status.textContent = !enabled ? 'On' : 'Off';
-        status.classList.toggle('on', !enabled);
-        setStatus(typeof err === 'string' ? err : 'Failed to update.', true);
-      })
-      .finally(() => {
-        input.disabled = false;
-      });
-}
-
-function loadData() {
-    Promise.all([
-        fetch('/dashboard/providers/config').then(r => r.json()),
-        fetch('/api/gateway/providers').then(r => r.json())
-    ]).then(([cfgData, gwData]) => {
-        const files = cfgData.files || [];
-        const selected = files.find(f => f.selected) || files[0];
-        configPath = selected ? selected.path : '';
-        renderTable(buildRows(cfgData.providers || [], Array.isArray(gwData) ? gwData : []));
-    }).catch(() => {
-        document.getElementById('providerTableContainer').innerHTML = '<div class="empty-state">Failed to load providers.</div>';
-    });
-}
-
-document.getElementById('providerAnalyticsRange').addEventListener('change', loadProviderAnalytics);
-loadProviderAnalytics();
-loadData();
-</script>
+<script type="module" src="/dashboard/static/dashboard/providers.js"></script>
 {{end}}

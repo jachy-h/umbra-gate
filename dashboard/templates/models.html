@@ -460,5 +460,9 @@ function fmtDuration(ms) {
     return `${Math.round(ms)}ms`;
 }
 
+function fmtPercent(n) {
+    return `${Math.round((Number(n) || 0) * 100)}%`;
+}
+
 </script>
 {{end}}

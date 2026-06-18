@@ -33,28 +33,41 @@ func TestHomeRendersIconStatsAndUsageBreakdowns(t *testing.T) {
 	}
 	for _, want := range []string{
 		`class="page-title"`,
-		`class="icon"`,
-		"Tokens by Provider",
-		"Tokens by Model",
-		"/api/providers",
-		"/api/models",
-		"No usage yet",
+		`class="dashboard-metrics"`,
+		"tokensByProvider",
+		"tokensByModel",
+		"noUsageYet",
 		"stat-desc",
-		"todayRequestsDesc",
-		"avgLatencyDesc",
 		"analyticsRange",
-		"overviewSuccessRate",
-		"overviewAvgLatency",
-		"overviewP95Latency",
-		"/api/overview?range=",
 		"cdn.jsdelivr.net/npm/chart.js",
 		`id="usageTrendChart"`,
 		`id="languageToggle"`,
 		`data-i18n="dashboard"`,
+		"type=\"module\" src=\"/dashboard/static/dashboard/home.js\"",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("home body does not contain %q", want)
 		}
+	}
+}
+
+func TestDashboardStaticModulesAreServed(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "router.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer database.Close()
+
+	handler := New(database, nil)
+	req := httptest.NewRequest(http.MethodGet, "/dashboard/static/dashboard/home.js", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "vue.esm-browser.prod.js") {
+		t.Fatalf("static module missing Vue CDN import: %s", w.Body.String())
 	}
 }
 
@@ -74,7 +87,7 @@ func TestFailuresPageRendersAnalyticsUI(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
 	}
 	body := w.Body.String()
-	for _, want := range []string{"class=\"page-title\">Failures", "failureAnalyticsRange", "failureSummary", "failureCategories", "failureProviders", "failureModels", "recentFailures", "/api/failures?range="} {
+	for _, want := range []string{"class=\"page-title\">Failures", "failureAnalyticsRange", "failureSummary", "failureCategories", "failureProviders", "failureModels", "recentFailures", "/dashboard/static/dashboard/failures.js"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("failures page missing %q: %s", want, body)
 		}
@@ -97,7 +110,7 @@ func TestProvidersPageRendersManagementUI(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
 	}
 	body := w.Body.String()
-	for _, want := range []string{"class=\"page-title\">Providers", "Provider Analytics", "Management", "providerAnalyticsRange", "providerTokenChart", "providerSuccessChart", "providerAnalyticsContainer", "/api/providers/analytics?range=", "Success Rate", "Avg Latency", "Gateway forwarding", "providerTableContainer", "gw-switch", "/dashboard/providers/config", "/dashboard/providers/gateway", "@picocss/pico"} {
+	for _, want := range []string{"class=\"page-title\">Providers", "Provider Analytics", "Management", "providerAnalyticsRange", "providerTokenChart", "providerSuccessChart", "providerAnalyticsContainer", "gateway forwarding", "providerTableContainer", "provider-management-table", "/dashboard/static/dashboard/providers.js", "@picocss/pico"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("providers page missing %q: %s", want, body)
 		}

@@ -1,22 +1,39 @@
 # Personal AI Router
 
-Local-first LLM Gateway. Transparent proxy between AI clients and LLM providers, with usage statistics and a built-in dashboard.
+Local-first LLM gateway. It sits between AI clients and model providers, records usage locally, and exposes a built-in dashboard.
+
+## Highlights
+
+- Single Go binary
+- Local SQLite storage only, no telemetry
+- OpenAI-compatible and Anthropic proxying
+- Dashboard for sessions, models, providers, failures, and trend analytics
+- OpenCode provider integration and gateway toggling
 
 ## Quick Start
 
 ```bash
-# 1. Build
-go build -o personal-ai-router .
+git clone git@github.com:jachy-h/umbra-gate.git
+cd umbra-gate
+cp config.example.yaml config.yaml
 
-# 2. Edit config.yaml — see below
-# 3. Run
 export OPENAI_API_KEY=sk-xxxxx
+go build -o personal-ai-router .
 ./personal-ai-router
 ```
 
+Then open `http://127.0.0.1:4141/dashboard`.
+
+## Requirements
+
+- Go 1.24+
+- macOS, Linux, or another platform supported by Go
+
 ## Configuration
 
-`config.yaml`:
+Start from `config.example.yaml` and write your local settings to `config.yaml`.
+
+Example:
 
 ```yaml
 listen: "127.0.0.1:4141"
@@ -44,6 +61,8 @@ storage:
 | `providers.<id>.api_key` | yes | Literal key, or `${ENV_VAR}` to read from the environment. Missing env vars cause startup to fail. |
 | `storage.save_prompt` | no | Persist prompt/response content to the local DB |
 
+`config.yaml` is intentionally ignored by git so local secrets are not committed.
+
 ### How `base_url` works
 
 The router does **not** rewrite paths. Whatever the client sends after `/<provider-id>/` is appended to the configured `base_url`. So:
@@ -65,9 +84,11 @@ Client-supplied `Authorization` / `x-api-key` headers are stripped before forwar
 
 Open http://127.0.0.1:4141/dashboard.
 
-- **Sessions / Models / Providers** — usage statistics
-- **Providers** — manage your `opencode.json` (toggle "Use Gateway")
-- **Gateway** — manage `config.yaml` providers (add / edit / delete). Changes take effect immediately, no restart required. The previous file is backed up as `config.yaml.<timestamp>.bak`.
+- **Dashboard** - overview metrics and time-series usage trends
+- **Sessions / Models / Providers** - usage statistics
+- **Failures** - recent failure breakdowns and error visibility
+- **Providers** - manage your `opencode.json` and toggle gateway forwarding
+- **Gateway config sync** - provider changes are written to `config.yaml` immediately, with backup files like `config.yaml.<timestamp>.bak`
 
 API keys submitted via the dashboard are stored as the literal string you provide. To keep secrets out of the file, type `${YOUR_ENV_VAR}` instead of the raw key.
 
@@ -103,6 +124,19 @@ The gateway substitutes the `apiKey` placeholder with the real provider key from
 ## Data
 
 All data is stored locally in `router.db` (SQLite). No cloud dependencies. No telemetry.
+
+Generated local files such as `router.db`, `tmp/`, and backup configs are ignored by git.
+
+## Build And Test
+
+```bash
+go test ./...
+go build -o personal-ai-router .
+```
+
+## Install Notes
+
+There is no one-line installer in this repository yet. For macOS, the safest current path is still `go build` or downloading a signed release artifact once release packaging is added.
 
 ## Supported Protocols
 

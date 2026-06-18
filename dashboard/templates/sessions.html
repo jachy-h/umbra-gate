@@ -1,46 +1,12 @@
 {{define "content"}}
-<h1 style="margin-bottom:24px;font-size:24px;">Sessions</h1>
+<div id="sessionsApp">
+    <h1 style="margin-bottom:24px;font-size:24px;">Sessions</h1>
 
-<div class="card">
-    <table>
-        <thead>
-            <tr>
-                <th>Time</th>
-                <th>Provider</th>
-                <th>Model</th>
-                <th>Tokens</th>
-                <th>Duration</th>
-                <th>Status</th>
-                <th></th>
-            </tr>
-        </thead>
-        <tbody id="sessionsBody">
-            <tr><td colspan="7">Loading...</td></tr>
-        </tbody>
-    </table>
+    <card-section>
+        <session-table :sessions="sessions"></session-table>
+        <div class="vue-fallback"><table><tbody><tr><td colspan="7">Loading...</td></tr></tbody></table></div>
+    </card-section>
 </div>
 
-<script>
-fetch('/api/sessions')
-    .then(r => r.json())
-    .then(data => {
-        const tbody = document.getElementById('sessionsBody');
-        tbody.innerHTML = data.map(s => `
-            <tr>
-                <td>${esc(fmtTime(s.started_at))}</td>
-                <td>${esc(s.provider_name)}</td>
-                <td>${esc(s.model)}</td>
-                <td>${formatNum(s.prompt_tokens + s.completion_tokens)}</td>
-                <td>${esc(fmtDuration(s.duration_ms))}</td>
-                <td><span class="badge badge-${esc(s.status)}">${esc(s.status)}</span></td>
-                <td><a href="/dashboard/sessions/${s.id}">View</a></td>
-            </tr>
-        `).join('');
-    });
-
-function esc(s) { return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m]); }
-function fmtTime(t) { return new Date(t + 'Z').toLocaleString(); }
-function fmtDuration(ms) { return ms >= 1000 ? (ms/1000).toFixed(1)+'s' : ms+'ms'; }
-function formatNum(n) { if (n >= 1000000) return ((n/1000000).toFixed(1)+'M').replace('.0',''); if (n >= 1000) return ((n/1000).toFixed(1)+'K').replace('.0',''); return String(n); }
-</script>
+<script type="module" src="/dashboard/static/dashboard/sessions.js"></script>
 {{end}}
