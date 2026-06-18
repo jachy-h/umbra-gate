@@ -125,9 +125,20 @@ jobs:
 
           perl -0pi -e 's/version ".*?"/version "'"$VERSION"'"/' "$FORMULA"
           perl -0pi -e 's#url ".*/umbra-gate_Darwin_arm64.tar.gz"#url "https://github.com/jachy-h/umbra-gate/releases/download/v'"$VERSION"'/umbra-gate_Darwin_arm64.tar.gz"#' "$FORMULA"
-          perl -0pi -e 's#sha256 ".*?"\n    else#sha256 "'"$ARM_SHA"'"\n    else#' "$FORMULA"
           perl -0pi -e 's#url ".*/umbra-gate_Darwin_x86_64.tar.gz"#url "https://github.com/jachy-h/umbra-gate/releases/download/v'"$VERSION"'/umbra-gate_Darwin_x86_64.tar.gz"#' "$FORMULA"
-          perl -0pi -e 's#sha256 ".*?"\n  end#sha256 "'"$AMD_SHA"'"\n  end#' "$FORMULA"
+          ruby -e '
+            formula = File.read(ARGV[0])
+            arm_sha = ARGV[1]
+            amd_sha = ARGV[2]
+            lines = formula.lines
+            arm_index = lines.index { |line| line.include?("Darwin_arm64.tar.gz") }
+            amd_index = lines.index { |line| line.include?("Darwin_x86_64.tar.gz") }
+            raise "arm64 url line not found" unless arm_index
+            raise "x86_64 url line not found" unless amd_index
+            lines[arm_index + 1] = "      sha256 \"#{arm_sha}\"\n"
+            lines[amd_index + 1] = "      sha256 \"#{amd_sha}\"\n"
+            File.write(ARGV[0], lines.join)
+          ' "$FORMULA" "$ARM_SHA" "$AMD_SHA"
 
       - name: Commit and push formula update
         if: steps.tap_token.outputs.configured == 'true'
