@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -259,7 +260,7 @@ func printBanner(w io.Writer, cfg *config.Config, appDir string) {
 	} else {
 		fmt.Fprintf(w, "  ▶ Providers  (%d):\n", len(providerRows))
 		for _, row := range providerRows {
-			fmt.Fprintf(w, "      %-12s → %-40s (%s)\n", row.ID, row.BaseURL, row.Kind)
+			fmt.Fprintf(w, "      %-12s → %s\n", row.ID, row.BaseURL)
 		}
 	}
 
@@ -269,7 +270,16 @@ func printBanner(w io.Writer, cfg *config.Config, appDir string) {
 type startupProviderRow struct {
 	ID      string
 	BaseURL string
-	Kind    string
+}
+
+var startupProviderPriority = map[string]int{
+	"opencode":       0,
+	"github-copilot": 1,
+	"volcengine":     2,
+	"openrouter":     3,
+	"deepseek":       4,
+	"openai":         5,
+	"anthropic":      6,
 }
 
 func startupProviderRows(cfg *config.Config) []startupProviderRow {
@@ -280,23 +290,33 @@ func startupProviderRows(cfg *config.Config) []startupProviderRow {
 		if !ok {
 			continue
 		}
-		kind := string(p.Type)
-		if kind == "" {
-			kind = "passthrough"
-		}
 		rows = append(rows, startupProviderRow{
 			ID:      id,
 			BaseURL: p.BaseURL,
-			Kind:    kind,
 		})
 	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		leftRank := startupProviderRank(rows[i])
+		rightRank := startupProviderRank(rows[j])
+		if leftRank != rightRank {
+			return leftRank < rightRank
+		}
+		return rows[i].ID < rows[j].ID
+	})
 	return rows
+}
+
+func startupProviderRank(row startupProviderRow) int {
+	if rank, ok := startupProviderPriority[row.ID]; ok {
+		return rank
+	}
+	return 1000
 }
 
 func startupProviderLabels(rows []startupProviderRow) []string {
 	labels := make([]string, 0, len(rows))
 	for _, row := range rows {
-		labels = append(labels, fmt.Sprintf("%s(%s)", row.ID, row.Kind))
+		labels = append(labels, row.ID)
 	}
 	return labels
 }

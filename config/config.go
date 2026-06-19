@@ -24,7 +24,7 @@ const (
 
 func (t ProviderType) Valid() bool {
 	if t == "" {
-		return true // passthrough (default when type omitted)
+		return true
 	}
 	switch t {
 	case ProviderTypeOpenAI, ProviderTypeAnthropic:
@@ -101,7 +101,7 @@ func Load(path string) (*Config, error) {
 func buildProvider(rp rawProviderConfig) (ProviderConfig, error) {
 	pt := ProviderType(strings.TrimSpace(rp.Type))
 	if !pt.Valid() {
-		return ProviderConfig{}, fmt.Errorf("unknown type %q (must be openai, anthropic, or empty for passthrough)", rp.Type)
+		return ProviderConfig{}, fmt.Errorf("unknown type %q (must be openai, anthropic, or empty)", rp.Type)
 	}
 	baseURL := strings.TrimSpace(rp.BaseURL)
 	if baseURL == "" {

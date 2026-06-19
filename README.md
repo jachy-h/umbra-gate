@@ -58,9 +58,7 @@ listen: "127.0.0.1:4141"
 
 providers:
   openai:
-    type: ""
     base_url: https://api.openai.com/v1
-    api_key: ""
 
   github-copilot:
     base_url: https://api.githubcopilot.com
@@ -69,7 +67,7 @@ providers:
 | Field | Required | Description |
 |-------|----------|-------------|
 | `listen` | no (default `127.0.0.1:4141`) | Listen address |
-| `providers.<id>.type` | no | `openai`, `anthropic`, or empty for passthrough |
+| `providers.<id>.type` | no | Advanced compatibility mode. Usually omit it. Supported values: `openai`, `anthropic`. |
 | `providers.<id>.base_url` | yes | Upstream base URL. The client request path is appended verbatim (e.g. a client requesting `/openai/v1/chat/completions` against `base_url: https://api.openai.com` proxies to `https://api.openai.com/v1/chat/completions`). |
 | `providers.<id>.api_key` | no | Optional literal key, or `${ENV_VAR}` to read from the environment. Missing env vars still cause startup to fail when referenced. |
 `config.yaml` is now safe to commit when you keep `api_key` empty or use `${ENV_VAR}` references instead of raw secrets.
@@ -86,13 +84,14 @@ The router does **not** rewrite paths. Whatever the client sends after `/<provid
 
 ### Authentication
 
+By default, the gateway forwards the client's auth headers unchanged. This keeps `config.yaml` token-free and works with OAuth-backed providers like GitHub Copilot.
+
+Advanced compatibility modes are available when `type` is set:
+
 - `type: openai` → gateway strips client auth headers and injects `Authorization: Bearer <api_key>`
 - `type: anthropic` → gateway strips client auth headers, injects `x-api-key: <api_key>`, and adds a default `anthropic-version` only when the client did not provide one
-- empty `type` → passthrough mode; the gateway preserves client auth headers and forwards them as-is unless `api_key` is configured in `config.yaml`
 
 Other headers (e.g. `anthropic-beta`, `OpenAI-Organization`) pass through.
-
-For OAuth-backed providers like GitHub Copilot, use passthrough mode and point the provider at `https://api.githubcopilot.com`. The client keeps sending its own bearer token and the gateway just forwards it.
 
 ## Dashboard
 
@@ -133,7 +132,7 @@ Point opencode at the gateway:
 }
 ```
 
-The gateway uses `config.yaml` as its provider routing map. For passthrough providers, client credentials continue to flow through unchanged.
+The gateway uses `config.yaml` as its provider routing map. Client credentials continue to flow through unchanged by default.
 
 ## Data
 

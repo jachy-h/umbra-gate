@@ -123,8 +123,7 @@ providers:
 	}
 }
 
-func TestLoadPassthroughDefaults(t *testing.T) {
-	// type and api_key are optional; defaults to passthrough with empty type.
+func TestLoadProviderDefaults(t *testing.T) {
 	path := writeTempConfig(t, `
 providers:
   zen:
@@ -139,7 +138,7 @@ providers:
 		t.Fatalf("provider missing")
 	}
 	if p.Type != "" {
-		t.Errorf("type = %q, want empty (passthrough)", p.Type)
+		t.Errorf("type = %q, want empty", p.Type)
 	}
 	if p.BaseURL != "https://opencode.ai/zen/v1" {
 		t.Errorf("base_url = %q", p.BaseURL)

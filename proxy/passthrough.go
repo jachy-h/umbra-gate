@@ -68,8 +68,6 @@ func (p *Proxy) buildPassthroughRequest(r *http.Request, providerCfg *config.Pro
 		return nil, err
 	}
 
-	// Passthrough: preserve all client headers including auth (Bearer / x-api-key).
-	// Only inject gateway-configured API key if explicitly set in config.
 	copyAllForwardableHeaders(req.Header, r.Header)
 	if providerCfg.APIKey != "" {
 		req.Header.Set("Authorization", "Bearer "+providerCfg.APIKey)

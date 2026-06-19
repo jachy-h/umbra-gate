@@ -39,19 +39,16 @@ providers:
 	if !strings.Contains(output, "  ▶ Providers  (3):") {
 		t.Fatalf("expected unified providers header, got:\n%s", output)
 	}
-	if strings.Contains(output, "Passthrough") {
-		t.Fatalf("expected no separate passthrough section, got:\n%s", output)
+	if strings.Contains(strings.ToLower(output), "passthrough") {
+		t.Fatalf("unexpected forwarding implementation detail in output:\n%s", output)
 	}
 	for _, want := range []string{
 		"anthropic",
 		"https://api.anthropic.com",
-		"(anthropic)",
 		"openai",
 		"https://api.openai.com",
-		"(openai)",
 		"zen",
 		"https://opencode.ai/api",
-		"(passthrough)",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected banner to contain %q, got:\n%s", want, output)
@@ -59,16 +56,22 @@ providers:
 	}
 }
 
-func TestStartupProviderLabels(t *testing.T) {
+func TestStartupProviderRowsSortByPriority(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
 	cfg, err := config.Load(writeTempConfigFile(t, configPath, `
 providers:
+  zen:
+    base_url: https://opencode.ai/api
+  anthropic:
+    type: anthropic
+    base_url: https://api.anthropic.com
+    api_key: literal-key
   openai:
     type: openai
     base_url: https://api.openai.com
     api_key: literal-key
-  zen:
-    base_url: https://opencode.ai/api
+  github-copilot:
+    base_url: https://api.githubcopilot.com
 `))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -76,7 +79,21 @@ providers:
 
 	labels := startupProviderLabels(startupProviderRows(cfg))
 	joined := strings.Join(labels, ",")
-	if joined != "openai(openai),zen(passthrough)" {
+	if joined != "github-copilot,openai,anthropic,zen" {
+		t.Fatalf("labels = %q", joined)
+	}
+}
+
+func TestStartupProviderRowsSortDefaultPriorities(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	cfg, err := config.Load(writeTempConfigFile(t, configPath, defaultConfigYAML))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	labels := startupProviderLabels(startupProviderRows(cfg))
+	joined := strings.Join(labels[:7], ",")
+	if joined != "opencode,github-copilot,volcengine,openrouter,deepseek,openai,anthropic" {
 		t.Fatalf("labels = %q", joined)
 	}
 }

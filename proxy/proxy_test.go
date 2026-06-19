@@ -83,7 +83,7 @@ func TestProxyOpenAIPathJoinAndAuth(t *testing.T) {
 	body := `{"model":"gpt-4o","messages":[]}`
 	req := httptest.NewRequest("POST", "/openai/chat/completions?foo=bar", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer client-fake")
-	req.Header.Set("X-Custom", "passthrough")
+	req.Header.Set("X-Custom", "forwarded")
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	p.ServeHTTP(w, req)
@@ -100,7 +100,7 @@ func TestProxyOpenAIPathJoinAndAuth(t *testing.T) {
 	if got := captured.headers.Get("Authorization"); got != "Bearer sk-real" {
 		t.Errorf("Authorization = %q, want Bearer sk-real (gateway must replace client key)", got)
 	}
-	if got := captured.headers.Get("X-Custom"); got != "passthrough" {
+	if got := captured.headers.Get("X-Custom"); got != "forwarded" {
 		t.Errorf("client header X-Custom not forwarded: %q", got)
 	}
 	if !bytes.Equal(captured.body, []byte(body)) {
@@ -201,7 +201,7 @@ func TestProxyUnknownProvider(t *testing.T) {
 	}
 }
 
-func TestProxyPassthroughPreservesClientAuthorization(t *testing.T) {
+func TestProxyDefaultForwardingPreservesClientAuthorization(t *testing.T) {
 	upstream, captured := newFakeUpstream(t, 200, `{"usage":{"prompt_tokens":1,"completion_tokens":2}}`)
 	cfg := newTestConfig(t, "github-copilot", config.ProviderConfig{
 		BaseURL: upstream.URL,
