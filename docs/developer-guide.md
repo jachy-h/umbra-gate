@@ -77,7 +77,7 @@ Tests use `httptest` for proxy routing validation, no real upstream needed.
 
 ## Configuration
 
-Config is loaded from `UMBRAGATE_HOME/config.yaml` when `UMBRAGATE_HOME` is set, otherwise from `./config.yaml` if present in the working directory, otherwise from `~/.umbragate/config.yaml`. On startup the app also creates `~/.umbragate/config.example.yaml` when missing. All providers are optional — add only what you need.
+Config is loaded from `UMBRAGATE_HOME/config.yaml` when `UMBRAGATE_HOME` is set, otherwise from `./config.yaml` if present in the working directory, otherwise from `~/.umbragate/config.yaml`. On startup the app creates a default `config.yaml` when missing. All providers are optional — add only what you need.
 
 ## Database
 

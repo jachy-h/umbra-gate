@@ -65,8 +65,8 @@ jobs:
             mkdir -p "$root"
 
             CGO_ENABLED=0 GOOS=darwin GOARCH="$goarch" go build -trimpath -ldflags="-s -w" -o "$root/umbragate" .
-            cp config.example.yaml "$root/config.example.yaml"
-            tar -C "$root" -czf "dist/${archive}" umbragate config.example.yaml
+            cp config.yaml "$root/config.yaml"
+            tar -C "$root" -czf "dist/${archive}" umbragate config.yaml
           }
 
           build_archive arm64 arm64

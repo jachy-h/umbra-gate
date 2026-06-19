@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	_ "embed"
 	"fmt"
 	"io"
 	"log/slog"
@@ -35,9 +34,6 @@ type cliOptions struct {
 	help   bool
 }
 
-//go:embed config.example.yaml
-var embeddedConfigExample []byte
-
 func main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo})))
 
@@ -61,8 +57,9 @@ func main() {
 		slog.Error("failed to create app directory", "path", appDir, "error", err)
 		os.Exit(1)
 	}
-	if err := ensureConfigExample(appDir); err != nil {
-		slog.Error("failed to write config example", "path", filepath.Join(appDir, "config.example.yaml"), "error", err)
+	configPath := filepath.Join(appDir, configFileName)
+	if err := ensureConfigFile(configPath); err != nil {
+		slog.Error("failed to write config", "path", configPath, "error", err)
 		os.Exit(1)
 	}
 
@@ -76,7 +73,6 @@ func main() {
 		return
 	}
 
-	configPath := filepath.Join(appDir, configFileName)
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		slog.Error("failed to load config", "path", configPath, "error", err)
@@ -113,11 +109,14 @@ func main() {
 		Handler: mux,
 	}
 
+	printBanner(os.Stdout, cfg, appDir)
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	go func() {
-		slog.Info("starting server", "listen", cfg.Listen(), "providers", cfg.ProviderIDs())
+		providerRows := startupProviderRows(cfg)
+		slog.Info("starting server", "listen", cfg.Listen(), "provider_count", len(providerRows), "providers", startupProviderLabels(providerRows))
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server error", "error", err)
 			os.Exit(1)
@@ -227,12 +226,77 @@ func filterDaemonArgs(args []string) []string {
 	return filtered
 }
 
-func ensureConfigExample(appDir string) error {
-	examplePath := filepath.Join(appDir, "config.example.yaml")
-	if _, err := os.Stat(examplePath); err == nil {
+func ensureConfigFile(path string) error {
+	if _, err := os.Stat(path); err == nil {
 		return nil
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	return os.WriteFile(examplePath, embeddedConfigExample, 0o600)
+	return os.WriteFile(path, []byte(defaultConfigYAML), 0o600)
+}
+
+func printBanner(w io.Writer, cfg *config.Config, appDir string) {
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "  ██╗   ██╗███╗   ███╗██████╗ ██████╗  █████╗  ██████╗  █████╗ ████████╗███████╗")
+	fmt.Fprintln(w, "  ██║   ██║████╗ ████║██╔══██╗██╔══██╗██╔══██╗██╔════╝ ██╔══██╗╚══██╔══╝██╔════╝")
+	fmt.Fprintln(w, "  ██║   ██║██╔████╔██║██████╔╝██████╔╝███████║██║  ███╗███████║   ██║   █████╗  ")
+	fmt.Fprintln(w, "  ██║   ██║██║╚██╔╝██║██╔══██╗██╔══██╗██╔══██║██║   ██║██╔══██║   ██║   ██╔══╝  ")
+	fmt.Fprintln(w, "  ╚██████╔╝██║ ╚═╝ ██║██████╔╝██║  ██║██║  ██║╚██████╔╝██║  ██║   ██║   ███████╗")
+	fmt.Fprintln(w, "   ╚═════╝ ╚═╝     ╚═╝╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝   ╚═╝   ╚══════╝")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "                             LLM API Gateway · Dashboard")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "  ▶ Listen    ", cfg.Listen())
+	fmt.Fprintf(w, "  ▶ Dashboard  http://%s/dashboard\n", cfg.Listen())
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "  ▶ Config     %s\n", filepath.Join(appDir, configFileName))
+	fmt.Fprintf(w, "  ▶ Logs       %s\n", filepath.Join(appDir, logFileName))
+	fmt.Fprintln(w)
+
+	providerRows := startupProviderRows(cfg)
+	if len(providerRows) == 0 {
+		fmt.Fprintln(w, "  ▶ Providers   (none configured)")
+	} else {
+		fmt.Fprintf(w, "  ▶ Providers  (%d):\n", len(providerRows))
+		for _, row := range providerRows {
+			fmt.Fprintf(w, "      %-12s → %-40s (%s)\n", row.ID, row.BaseURL, row.Kind)
+		}
+	}
+
+	fmt.Fprintln(w)
+}
+
+type startupProviderRow struct {
+	ID      string
+	BaseURL string
+	Kind    string
+}
+
+func startupProviderRows(cfg *config.Config) []startupProviderRow {
+	ids := cfg.ProviderIDs()
+	rows := make([]startupProviderRow, 0, len(ids))
+	for _, id := range ids {
+		p, ok := cfg.Provider(id)
+		if !ok {
+			continue
+		}
+		kind := string(p.Type)
+		if kind == "" {
+			kind = "passthrough"
+		}
+		rows = append(rows, startupProviderRow{
+			ID:      id,
+			BaseURL: p.BaseURL,
+			Kind:    kind,
+		})
+	}
+	return rows
+}
+
+func startupProviderLabels(rows []startupProviderRow) []string {
+	labels := make([]string, 0, len(rows))
+	for _, row := range rows {
+		labels = append(labels, fmt.Sprintf("%s(%s)", row.ID, row.Kind))
+	}
+	return labels
 }

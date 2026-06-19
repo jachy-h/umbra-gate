@@ -1,0 +1,86 @@
+package main
+
+const defaultConfigYAML = `listen: 127.0.0.1:4141
+
+providers:
+  anthropic:
+    type: ""
+    base_url: https://api.anthropic.com
+    api_key: ""
+  cerebras:
+    type: ""
+    base_url: https://api.cerebras.ai/v1
+    api_key: ""
+  cloudflare-ai-gateway:
+    type: ""
+    base_url: https://gateway.ai.cloudflare.com/v1/{ACCOUNT_ID}/{GATEWAY_ID}
+    api_key: ""
+  deepinfra:
+    type: ""
+    base_url: https://api.deepinfra.com/v1/openai
+    api_key: ""
+  deepseek:
+    type: ""
+    base_url: https://api.deepseek.com/v1
+    api_key: ""
+  fireworks:
+    type: ""
+    base_url: https://api.fireworks.ai/inference/v1
+    api_key: ""
+  google:
+    type: ""
+    base_url: https://generativelanguage.googleapis.com/v1beta
+    api_key: ""
+  github-copilot:
+    type: ""
+    base_url: https://api.githubcopilot.com
+    api_key: ""
+  groq:
+    type: ""
+    base_url: https://api.groq.com/openai/v1
+    api_key: ""
+  helicone:
+    type: ""
+    base_url: https://ai-gateway.helicone.ai
+    api_key: ""
+  huggingface:
+    type: ""
+    base_url: https://api-inference.huggingface.co/v1
+    api_key: ""
+  minimax:
+    type: ""
+    base_url: https://api.minimax.chat/v1
+    api_key: ""
+  moonshot:
+    type: ""
+    base_url: https://api.moonshot.cn/v1
+    api_key: ""
+  openai:
+    type: ""
+    base_url: https://api.openai.com/v1
+    api_key: ""
+  opencode:
+    type: ""
+    base_url: https://opencode.ai/zen/v1
+    api_key: ""
+  openrouter:
+    type: ""
+    base_url: https://openrouter.ai/api/v1
+    api_key: ""
+  together:
+    type: ""
+    base_url: https://api.together.xyz/v1
+    api_key: ""
+  vercel:
+    type: ""
+    base_url: https://api.ai.vercel.com/v1
+    api_key: ""
+  volcengine:
+    type: ""
+    base_url: https://ark.cn-beijing.volces.com/api/coding/v3
+    api_key: ""
+  xai:
+    type: ""
+    base_url: https://api.x.ai/v1
+    api_key: ""
+`

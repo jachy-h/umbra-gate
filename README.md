@@ -15,9 +15,6 @@ Local-first LLM gateway. It sits between AI clients and model providers, records
 ```bash
 git clone git@github.com:jachy-h/umbra-gate.git
 cd umbragate
-cp config.example.yaml config.yaml
-
-export OPENAI_API_KEY=sk-xxxxx
 go build -o umbragate .
 ./umbragate
 ```
@@ -33,7 +30,6 @@ brew tap jachy-h/umbragate
 brew trust --tap jachy-h/umbragate
 brew install umbragate
 umbragate
-cp ~/.umbragate/config.example.yaml ~/.umbragate/config.yaml
 ```
 
 The supported Homebrew path is the tagged release build.
@@ -45,7 +41,7 @@ The supported Homebrew path is the tagged release build.
 
 ## Configuration
 
-Start from `config.example.yaml` and write your local settings to `config.yaml`.
+`config.yaml` is created automatically on first startup.
 
 The runtime looks for `config.yaml` in this order:
 
@@ -53,7 +49,7 @@ The runtime looks for `config.yaml` in this order:
 2. `./config.yaml` in the current working directory
 3. default: `~/.umbragate/config.yaml`
 
-On startup, Umbragate automatically creates `~/.umbragate/` when needed and writes `~/.umbragate/config.example.yaml` if it does not already exist.
+On startup, Umbragate automatically creates `~/.umbragate/` when needed and writes a default `config.yaml` if it does not already exist.
 
 Example:
 
@@ -62,28 +58,21 @@ listen: "127.0.0.1:4141"
 
 providers:
   openai:
-    type: openai                       # openai | anthropic
-    base_url: https://api.openai.com   # client request path is appended as-is
-    api_key: ${OPENAI_API_KEY}         # literal string or ${ENV_VAR}
+    type: ""
+    base_url: https://api.openai.com/v1
+    api_key: ""
 
-  anthropic:
-    type: anthropic
-    base_url: https://api.anthropic.com
-    api_key: ${ANTHROPIC_API_KEY}
-
-storage:
-  save_prompt: false
+  github-copilot:
+    base_url: https://api.githubcopilot.com
 ```
 
 | Field | Required | Description |
 |-------|----------|-------------|
 | `listen` | no (default `127.0.0.1:4141`) | Listen address |
-| `providers.<id>.type` | yes | `openai` or `anthropic` |
+| `providers.<id>.type` | no | `openai`, `anthropic`, or empty for passthrough |
 | `providers.<id>.base_url` | yes | Upstream base URL. The client request path is appended verbatim (e.g. a client requesting `/openai/v1/chat/completions` against `base_url: https://api.openai.com` proxies to `https://api.openai.com/v1/chat/completions`). |
-| `providers.<id>.api_key` | yes | Literal key, or `${ENV_VAR}` to read from the environment. Missing env vars cause startup to fail. |
-| `storage.save_prompt` | no | Persist prompt/response content to the local DB |
-
-`config.yaml` is intentionally ignored by git so local secrets are not committed.
+| `providers.<id>.api_key` | no | Optional literal key, or `${ENV_VAR}` to read from the environment. Missing env vars still cause startup to fail when referenced. |
+`config.yaml` is now safe to commit when you keep `api_key` empty or use `${ENV_VAR}` references instead of raw secrets.
 
 ### How `base_url` works
 
@@ -97,10 +86,13 @@ The router does **not** rewrite paths. Whatever the client sends after `/<provid
 
 ### Authentication
 
-- `type: openai` → gateway injects `Authorization: Bearer <api_key>`
-- `type: anthropic` → gateway injects `x-api-key: <api_key>` plus a default `anthropic-version` (only if the client did not provide one)
+- `type: openai` → gateway strips client auth headers and injects `Authorization: Bearer <api_key>`
+- `type: anthropic` → gateway strips client auth headers, injects `x-api-key: <api_key>`, and adds a default `anthropic-version` only when the client did not provide one
+- empty `type` → passthrough mode; the gateway preserves client auth headers and forwards them as-is unless `api_key` is configured in `config.yaml`
 
-Client-supplied `Authorization` / `x-api-key` headers are stripped before forwarding. Other headers (e.g. `anthropic-beta`, `OpenAI-Organization`) pass through.
+Other headers (e.g. `anthropic-beta`, `OpenAI-Organization`) pass through.
+
+For OAuth-backed providers like GitHub Copilot, use passthrough mode and point the provider at `https://api.githubcopilot.com`. The client keeps sending its own bearer token and the gateway just forwards it.
 
 ## Dashboard
 
@@ -141,7 +133,7 @@ Point opencode at the gateway:
 }
 ```
 
-The gateway substitutes the `apiKey` placeholder with the real provider key from `config.yaml`.
+The gateway uses `config.yaml` as its provider routing map. For passthrough providers, client credentials continue to flow through unchanged.
 
 ## Data
 
@@ -161,7 +153,6 @@ If installed with Homebrew and started normally, the default stats database path
 Default related paths:
 
 - config: `~/.umbragate/config.yaml`
-- config example: `~/.umbragate/config.example.yaml`
 - database: `~/.umbragate/router.db`
 - log: `~/.umbragate/umbragate.log`
 

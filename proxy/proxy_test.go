@@ -201,6 +201,34 @@ func TestProxyUnknownProvider(t *testing.T) {
 	}
 }
 
+func TestProxyPassthroughPreservesClientAuthorization(t *testing.T) {
+	upstream, captured := newFakeUpstream(t, 200, `{"usage":{"prompt_tokens":1,"completion_tokens":2}}`)
+	cfg := newTestConfig(t, "github-copilot", config.ProviderConfig{
+		BaseURL: upstream.URL,
+	})
+	p := New(cfg, newTestDB(t))
+
+	req := httptest.NewRequest("POST", "/github-copilot/chat/completions", strings.NewReader(`{"model":"gpt-4o-mini","messages":[]}`))
+	req.Header.Set("Authorization", "Bearer client-oauth-token")
+	req.Header.Set("Editor-Version", "vscode/1.100.0")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	p.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	if got := captured.headers.Get("Authorization"); got != "Bearer client-oauth-token" {
+		t.Fatalf("Authorization = %q, want client token preserved", got)
+	}
+	if got := captured.headers.Get("Editor-Version"); got != "vscode/1.100.0" {
+		t.Fatalf("Editor-Version = %q", got)
+	}
+	if got := captured.url.Path; got != "/chat/completions" {
+		t.Fatalf("upstream path = %q", got)
+	}
+}
+
 func TestProxyConfigChangesAreLiveReloaded(t *testing.T) {
 	upstream, captured := newFakeUpstream(t, 200, `{}`)
 	cfg := newTestConfig(t, "openai", config.ProviderConfig{

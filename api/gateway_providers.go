@@ -75,10 +75,6 @@ func (h *Handler) createGatewayProvider(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, `{"error":"provider already exists"}`, http.StatusConflict)
 		return
 	}
-	if strings.TrimSpace(in.APIKey) == "" {
-		http.Error(w, `{"error":"api_key is required"}`, http.StatusBadRequest)
-		return
-	}
 	if err := upsertFromInput(h.cfg, id, in); err != nil {
 		writeUpsertError(w, err)
 		return

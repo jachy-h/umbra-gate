@@ -124,7 +124,6 @@ func TestGatewayProvidersCreateValidates(t *testing.T) {
 		"missing id":     `{"type":"openai","base_url":"https://x","api_key":"k"}`,
 		"bad type":       `{"id":"p","type":"bogus","base_url":"https://x","api_key":"k"}`,
 		"missing base":   `{"id":"p","type":"openai","api_key":"k"}`,
-		"missing key":    `{"id":"p","type":"openai","base_url":"https://x"}`,
 		"unset env ref":  `{"id":"p","type":"openai","base_url":"https://x","api_key":"${UNSET_VAR_AAA}"}`,
 		"malformed json": `{`,
 	}
@@ -137,6 +136,32 @@ func TestGatewayProvidersCreateValidates(t *testing.T) {
 				t.Errorf("status = %d body=%s", w.Code, w.Body.String())
 			}
 		})
+	}
+}
+
+func TestGatewayProvidersCreateAllowsBlankKey(t *testing.T) {
+	h, cfg, configPath := newGatewayTestSetup(t, "providers: {}\n")
+	body := `{
+		"id": "github-copilot",
+		"base_url": "https://api.githubcopilot.com",
+		"api_key": ""
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/gateway/providers", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+	p, ok := cfg.Provider("github-copilot")
+	if !ok {
+		t.Fatalf("provider not stored")
+	}
+	if p.APIKey != "" || p.APIKeyRaw != "" || p.BaseURL != "https://api.githubcopilot.com" {
+		t.Errorf("provider stored wrong: %+v", p)
+	}
+	data, _ := os.ReadFile(configPath)
+	if !strings.Contains(string(data), "github-copilot") {
+		t.Errorf("config not persisted:\n%s", data)
 	}
 }
 

@@ -133,7 +133,7 @@ umbragate --help
 
 Verify default filesystem layout:
 
-- `~/.umbragate/config.example.yaml` should exist
+- `~/.umbragate/config.yaml` should exist
 - `~/.umbragate/config.yaml` is the active config file when created
 - `~/.umbragate/router.db` is the local stats database
 - `~/.umbragate/umbragate.log` is used by `umbragate -d`

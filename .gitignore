@@ -4,13 +4,14 @@ personal-ai-router
 *.out
 *.test
 
-# Local config
-config.yaml
+# Local config backups
 config.yaml.*.bak
 
 # Database
 router.db
 router.db-*
+router.db-shm
+router.db-wal
 *.db
 *.db-*
 
