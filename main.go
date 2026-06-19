@@ -24,6 +24,7 @@ import (
 
 const (
 	appName          = "umbragate"
+	appVersion       = "0.3.2"
 	configFileName   = "config.yaml"
 	databaseFileName = "router.db"
 	logFileName      = "umbragate.log"
@@ -31,8 +32,9 @@ const (
 )
 
 type cliOptions struct {
-	daemon bool
-	help   bool
+	daemon  bool
+	help    bool
+	version bool
 }
 
 func main() {
@@ -46,6 +48,10 @@ func main() {
 	}
 	if opts.help {
 		printUsage(os.Stdout)
+		return
+	}
+	if opts.version {
+		fmt.Printf("%s version %s\n", appName, appVersion)
 		return
 	}
 
@@ -142,6 +148,8 @@ func parseArgs(args []string) (cliOptions, error) {
 			opts.daemon = true
 		case "-h", "--help", "help":
 			opts.help = true
+		case "-v", "--version", "version":
+			opts.version = true
 		case "":
 			continue
 		default:
@@ -155,7 +163,8 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "Usage: %s [daemon|-d]\n\n", appName)
 	fprintf(w, "Commands and flags:\n")
 	fprintf(w, "  daemon, deamon, -d, --daemon  Start in background\n")
-	fprintf(w, "  -h, --help                    Show this help\n\n")
+	fprintf(w, "  -h, --help                    Show this help\n")
+	fprintf(w, "  -v, --version                 Print version\n\n")
 	fprintf(w, "Config and data:\n")
 	fprintf(w, "  Uses ./config.yaml when present in the current directory.\n")
 	fprintf(w, "  Otherwise uses ~/.%s/.\n", appName)
