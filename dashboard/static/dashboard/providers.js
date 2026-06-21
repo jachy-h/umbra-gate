@@ -1,13 +1,15 @@
 import { createApp } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.prod.js';
-import { ProviderAnalyticsRows, ProviderManagementTable } from './components.js';
+import { CodexManagementTable, ProviderAnalyticsRows, ProviderManagementTable } from './components.js';
 
 createApp({
-    components: { ProviderAnalyticsRows, ProviderManagementTable },
+    components: { CodexManagementTable, ProviderAnalyticsRows, ProviderManagementTable },
     data() {
         return {
             range: '7d',
             configPath: '',
+            codexConfigPath: '',
             providerRows: [],
+            codexRows: [],
             analyticsRows: [],
             status: '',
             statusError: false,
@@ -19,6 +21,7 @@ createApp({
         document.documentElement.classList.add('vue-ready');
         this.loadProviderAnalytics();
         this.loadData();
+        this.loadCodexData();
     },
     methods: {
         buildRows(openRows, gwRows) {
@@ -68,6 +71,17 @@ createApp({
                 this.setStatus('Failed to load providers.', true);
             }
         },
+        async loadCodexData() {
+            try {
+                const data = await fetch('/dashboard/codex/config').then(response => response.json());
+                const files = data.files || [];
+                const selected = files.find(file => file.selected) || files[0];
+                this.codexConfigPath = selected ? selected.path : '';
+                this.codexRows = data.providers || [];
+            } catch {
+                this.codexRows = [];
+            }
+        },
         async onToggle(provider, enabled) {
             const previous = provider.gateway_enabled;
             provider.updating = true;
@@ -89,6 +103,32 @@ createApp({
                 provider.gateway_enabled = previous;
                 provider.statusText = previous ? 'On' : 'Off';
                 this.setStatus(error.message || 'Failed to update.', true);
+            } finally {
+                provider.updating = false;
+            }
+        },
+        async onCodexToggle(provider, enabled) {
+            const previous = provider.gateway_enabled;
+            provider.updating = true;
+            provider.statusText = enabled ? 'Enabling...' : 'Disabling...';
+            provider.gateway_enabled = enabled;
+            try {
+                const response = await fetch('/dashboard/codex/gateway', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: provider.id, enabled, path: this.codexConfigPath })
+                });
+                if (!response.ok) {
+                    const data = await response.json();
+                    throw new Error(data.error || 'failed');
+                }
+                provider.statusText = enabled ? 'On' : 'Off';
+                this.setStatus(`Codex gateway ${enabled ? 'enabled' : 'disabled'} for ${provider.id}.`);
+                await this.loadData();
+            } catch (error) {
+                provider.gateway_enabled = previous;
+                provider.statusText = previous ? 'On' : 'Off';
+                this.setStatus(error.message || 'Failed to update Codex.', true);
             } finally {
                 provider.updating = false;
             }

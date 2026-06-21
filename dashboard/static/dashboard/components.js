@@ -33,7 +33,7 @@ export const AppHeader = {
     },
     template: `
         <nav>
-            <span class="brand">AI Router</span>
+            <span class="brand">Umbragate</span>
             <a v-for="item in items" :key="item.key" :href="item.href" :class="{ active: item.key === active }">{{ label(item) }}</a>
             <span class="nav-spacer"></span>
             <button id="languageToggle" class="lang-toggle" type="button" @click="toggleLang">{{ switchLabel }}</button>
@@ -294,6 +294,45 @@ export const ProviderManagementTable = {
                                 <span :class="['gw-status', { on: provider.gateway_enabled }]">{{ provider.statusText || (provider.gateway_enabled ? 'On' : 'Off') }}</span>
                             </div>
                             <span v-else class="empty-state" style="padding:0;font-size:13px;">— gateway upstream</span>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    `
+};
+
+export const CodexManagementTable = {
+    props: ['rows', 'configPath'],
+    emits: ['toggle'],
+    methods: {
+        tags(provider) {
+            const tags = [];
+            if (provider.active) tags.push({ label: 'active', className: 'badge-success' });
+            if (provider.configured) tags.push({ label: 'configured', className: 'badge-success' });
+            if (provider.gateway_enabled) tags.push({ label: 'gateway', className: 'badge-success' });
+            if (!tags.length) tags.push({ label: 'unconfigured', className: 'badge-pending' });
+            return tags;
+        }
+    },
+    template: `
+        <div>
+            <div v-if="configPath" class="config-path">writes to: {{ configPath }}</div>
+            <div v-if="!rows.length" class="empty-state">No Codex providers available.</div>
+            <table v-else>
+                <thead><tr><th>Codex Provider</th><th>Status</th><th>Gateway forwarding</th></tr></thead>
+                <tbody>
+                    <tr v-for="provider in rows" :key="'codex:' + provider.id">
+                        <td>
+                            <strong>{{ provider.name || provider.id }}</strong>
+                            <div class="provider-subline">{{ provider.id }} · {{ provider.wire_api || 'responses' }} · {{ provider.env_key || 'OPENAI_API_KEY' }}</div>
+                        </td>
+                        <td><span v-for="tag in tags(provider)" :key="tag.label" :class="['badge', tag.className]">{{ tag.label }}</span></td>
+                        <td>
+                            <div class="gw-cell">
+                                <label><input type="checkbox" role="switch" class="gw-switch" :checked="provider.gateway_enabled" :disabled="provider.updating" @change="$emit('toggle', provider, $event.target.checked)"></label>
+                                <span :class="['gw-status', { on: provider.gateway_enabled }]">{{ provider.statusText || (provider.gateway_enabled ? 'On' : 'Off') }}</span>
+                            </div>
                         </td>
                     </tr>
                 </tbody>

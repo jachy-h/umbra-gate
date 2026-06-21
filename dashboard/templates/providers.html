@@ -24,10 +24,14 @@
         <div class="card">
             <div class="provider-analytics-header">
                 <h2>Management</h2>
-                <span class="empty-state" style="padding:0;font-size:13px;">Toggle gateway forwarding per provider</span>
+                <span class="empty-state" style="padding:0;font-size:13px;">Toggle gateway forwarding per client</span>
             </div>
             <provider-management-table id="providerTableContainer" :rows="providerRows" :config-path="configPath" @toggle="onToggle"></provider-management-table>
             <div class="vue-fallback"><div class="empty-state">Loading...</div></div>
+            <div class="codex-section">
+                <h3>Codex CLI</h3>
+                <codex-management-table id="codexTableContainer" :rows="codexRows" :config-path="codexConfigPath" @toggle="onCodexToggle"></codex-management-table>
+            </div>
             <div id="globalStatus" class="empty-state" :style="{ minHeight: '20px', marginTop: '8px', color: statusError ? '#c53030' : '#0d7d44' }">{{`{{ status }}`}}</div>
         </div>
     </div>
@@ -41,7 +45,10 @@
 .gw-status.on { color:#0d7d44; font-weight:600; }
 .config-path { font-family: ui-monospace, Menlo, monospace; font-size:11px; color:#6b7280; padding:6px 10px; background:#f9fafb; border-radius:4px; display:inline-block; margin-bottom:12px; }
 .row-source { font-size:11px; color:#6b7280; text-transform:uppercase; letter-spacing:0.5px; margin-left:8px; }
+.provider-subline { font-size:12px; color:#6b7280; margin-top:3px; }
 .gw-cell input[type="checkbox"][role="switch"]:checked { --pico-color: #4f46e5; --pico-background-color: #4f46e5; --pico-border-color: #4f46e5; }
+.codex-section { margin-top:22px; padding-top:18px; border-top:1px solid #eef2f7; }
+.codex-section h3 { font-size:16px; margin:0 0 12px; color:#111827; }
 .provider-analytics-header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px; }
 .provider-analytics-header h2 { margin:0; }
 .provider-analytics-header select { width:auto; min-width:120px; margin:0; }

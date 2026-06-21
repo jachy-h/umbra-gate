@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/jachy-h/umbra-gate/codexconfig"
 	"github.com/jachy-h/umbra-gate/config"
 	"github.com/jachy-h/umbra-gate/db"
 	"github.com/jachy-h/umbra-gate/opencodeconfig"
@@ -29,6 +30,7 @@ type pageData struct {
 
 type Options struct {
 	OpencodeConfigPath  string
+	CodexConfigPath     string
 	ProviderListCommand func() ([]byte, error)
 	GatewayBaseURL      string
 	GatewayConfig       *config.Config
@@ -38,6 +40,7 @@ type Handler struct {
 	db                  *db.DB
 	templates           map[string]*template.Template
 	opencode            opencodeconfig.Manager
+	codex               codexconfig.Manager
 	providerListCommand func() ([]byte, error)
 	gatewayBaseURL      string
 	gatewayCfg          *config.Config
@@ -78,7 +81,15 @@ func newWithOptions(database *db.DB, options Options) *Handler {
 	if gatewayBaseURL == "" {
 		gatewayBaseURL = "http://127.0.0.1:4141"
 	}
-	return &Handler{db: database, templates: templates, opencode: opencodeconfig.Manager{Path: options.OpencodeConfigPath}, providerListCommand: providerListCommand, gatewayBaseURL: gatewayBaseURL, gatewayCfg: options.GatewayConfig}
+	return &Handler{
+		db:                  database,
+		templates:           templates,
+		opencode:            opencodeconfig.Manager{Path: options.OpencodeConfigPath},
+		codex:               codexconfig.Manager{Path: options.CodexConfigPath},
+		providerListCommand: providerListCommand,
+		gatewayBaseURL:      gatewayBaseURL,
+		gatewayCfg:          options.GatewayConfig,
+	}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -137,6 +148,26 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if path == "providers/gateway" {
 		h.providerGateway(w, r)
+		return
+	}
+
+	if path == "codex/config" {
+		h.codexConfig(w, r)
+		return
+	}
+
+	if path == "codex/diff" {
+		h.codexDiff(w, r)
+		return
+	}
+
+	if path == "codex/apply" {
+		h.codexApply(w, r)
+		return
+	}
+
+	if path == "codex/gateway" {
+		h.codexGateway(w, r)
 		return
 	}
 
@@ -213,6 +244,22 @@ type providerApplyRequest struct {
 	BaseChecksum string `json:"base_checksum"`
 }
 
+type codexConfigResponse struct {
+	Files     []codexconfig.ConfigFile     `json:"files"`
+	Providers []codexconfig.ProviderStatus `json:"providers"`
+}
+
+type codexPlanRequest struct {
+	codexconfig.ProviderInput
+	Path string `json:"path"`
+}
+
+type codexApplyRequest struct {
+	codexconfig.ProviderInput
+	Path         string `json:"path"`
+	BaseChecksum string `json:"base_checksum"`
+}
+
 func (h *Handler) providerConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
@@ -236,6 +283,69 @@ func (h *Handler) providerConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeDashboardJSON(w, providerConfigResponse{Files: files, Providers: providerStatuses(cfg, providerList, h.gatewayBaseURL), Config: cfg})
+}
+
+func (h *Handler) codexConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	files := codexconfig.Discover()
+	manager := h.codex
+	if manager.Path != "" {
+		files = []codexconfig.ConfigFile{{Path: manager.Path, Label: manager.Path, Exists: true, Selected: true}}
+	} else if len(files) > 0 {
+		manager.Path = files[0].Path
+	}
+	statuses, err := manager.Statuses(h.codexProviderIDs(), h.gatewayBaseURL)
+	if err != nil {
+		http.Error(w, `{"error":"failed to read codex config"}`, http.StatusInternalServerError)
+		return
+	}
+	writeDashboardJSON(w, codexConfigResponse{Files: files, Providers: statuses})
+}
+
+func (h *Handler) codexDiff(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	var input codexPlanRequest
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+		return
+	}
+	manager := h.codexManagerForPath(input.Path)
+	input.ProviderInput = h.withCodexGatewayBaseURL(input.ProviderInput)
+	plan, err := manager.Plan(input.ProviderInput)
+	if err != nil {
+		http.Error(w, `{"error":"failed to plan codex config"}`, http.StatusInternalServerError)
+		return
+	}
+	writeDashboardJSON(w, plan)
+}
+
+func (h *Handler) codexApply(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	var input codexApplyRequest
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+		return
+	}
+	manager := h.codexManagerForPath(input.Path)
+	input.ProviderInput = h.withCodexGatewayBaseURL(input.ProviderInput)
+	if err := manager.Apply(input.ProviderInput, input.BaseChecksum); err != nil {
+		if errors.Is(err, codexconfig.ErrStaleConfig) {
+			http.Error(w, `{"error":"stale codex config"}`, http.StatusConflict)
+			return
+		}
+		http.Error(w, `{"error":"failed to apply codex config"}`, http.StatusInternalServerError)
+		return
+	}
+	writeDashboardJSON(w, map[string]bool{"ok": true})
 }
 
 func (h *Handler) providerDiff(w http.ResponseWriter, r *http.Request) {
@@ -373,10 +483,80 @@ func (h *Handler) providerGateway(w http.ResponseWriter, r *http.Request) {
 	writeDashboardJSON(w, map[string]bool{"ok": true})
 }
 
+func (h *Handler) codexGateway(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	var input gatewayToggleRequest
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+		return
+	}
+	id := strings.TrimSpace(input.ID)
+	if id == "" {
+		http.Error(w, `{"error":"id is required"}`, http.StatusBadRequest)
+		return
+	}
+	if input.Enabled {
+		h.ensureCodexGatewayProvider(id)
+	}
+	manager := h.codexManagerForPath(input.Path)
+	plan, err := manager.Plan(codexconfig.ProviderInput{ID: id})
+	if err != nil {
+		http.Error(w, `{"error":"failed to read codex config"}`, http.StatusInternalServerError)
+		return
+	}
+	gateway := codexconfig.GatewayDisable
+	if input.Enabled {
+		gateway = codexconfig.GatewayEnable
+	}
+	provider := codexconfig.ProviderInput{
+		ID:             id,
+		Gateway:        gateway,
+		GatewayBaseURL: h.gatewayBaseURL,
+	}
+	if err := manager.Apply(provider, plan.BaseChecksum); err != nil {
+		http.Error(w, `{"error":"failed to apply codex config"}`, http.StatusInternalServerError)
+		return
+	}
+	writeDashboardJSON(w, map[string]bool{"ok": true})
+}
+
+func (h *Handler) ensureCodexGatewayProvider(id string) {
+	if h.gatewayCfg == nil {
+		return
+	}
+	if _, exists := h.gatewayCfg.Provider(id); exists {
+		return
+	}
+	baseURL := defaultCodexUpstreamURL(id)
+	if baseURL == "" {
+		slog.Warn("cannot determine upstream URL for codex gateway provider; add it to config.yaml manually", "provider", id)
+		return
+	}
+	if err := h.gatewayCfg.UpsertProvider(id, config.ProviderConfig{BaseURL: baseURL}); err != nil {
+		slog.Warn("failed to register codex gateway provider", "error", err)
+		return
+	}
+	if err := h.gatewayCfg.Save(); err != nil {
+		slog.Warn("failed to save gateway config", "error", err)
+	}
+}
+
+func defaultCodexUpstreamURL(id string) string {
+	switch strings.ToLower(strings.TrimSpace(id)) {
+	case "openai":
+		return "https://api.openai.com"
+	default:
+		return ""
+	}
+}
+
 func providerStatuses(cfg map[string]any, providerList []providerListEntry, gatewayBaseURL string) []providerStatus {
 	statuses := map[string]providerStatus{}
 	for _, entry := range providerList {
-		statuses[entry.ID] = providerStatus{ID: entry.ID, Name: entry.Name, BuiltIn: true}
+		statuses[entry.ID] = providerStatus{ID: entry.ID, Name: normalizeProviderDisplayName(entry.Name), BuiltIn: true}
 	}
 	// Build lookup: lowercase key -> id, slug -> id, lowercase name -> id, slug name -> id
 	providers, _ := cfg["provider"].(map[string]any)
@@ -413,7 +593,7 @@ func providerStatuses(cfg map[string]any, providerList []providerListEntry, gate
 		status.Configured = true
 		provider, _ := raw.(map[string]any)
 		if name, ok := provider["name"].(string); ok && name != "" {
-			status.Name = name
+			status.Name = normalizeProviderDisplayName(name)
 		}
 		if status.Name == "" {
 			status.Name = cfgID
@@ -451,11 +631,36 @@ func (h *Handler) withGatewayBaseURL(input opencodeconfig.ProviderInput) opencod
 	return input
 }
 
+func (h *Handler) withCodexGatewayBaseURL(input codexconfig.ProviderInput) codexconfig.ProviderInput {
+	if input.GatewayBaseURL == "" {
+		input.GatewayBaseURL = h.gatewayBaseURL
+	}
+	return input
+}
+
 func (h *Handler) managerForPath(path string) opencodeconfig.Manager {
 	if path != "" {
 		return opencodeconfig.Manager{Path: path}
 	}
 	return h.opencode
+}
+
+func (h *Handler) codexManagerForPath(path string) codexconfig.Manager {
+	if path != "" {
+		return codexconfig.Manager{Path: path}
+	}
+	return h.codex
+}
+
+func (h *Handler) codexProviderIDs() []string {
+	if h.gatewayCfg == nil {
+		return []string{codexconfig.DefaultProviderID}
+	}
+	ids := h.gatewayCfg.ProviderIDs()
+	if len(ids) == 0 {
+		return []string{codexconfig.DefaultProviderID}
+	}
+	return ids
 }
 
 func (h *Handler) opencodeProviders() ([]providerListEntry, error) {
@@ -519,6 +724,7 @@ func slugify(s string) string {
 var providerDisplayAliases = map[string]string{
 	"opencode zen":   "opencode",
 	"github copilot": "github-copilot",
+	"velcengine":     "volcengine",
 }
 
 func canonicalProviderID(name string) string {
@@ -527,6 +733,13 @@ func canonicalProviderID(name string) string {
 		return id
 	}
 	return slugify(name)
+}
+
+func normalizeProviderDisplayName(name string) string {
+	if strings.EqualFold(strings.TrimSpace(name), "Velcengine") {
+		return "Volcengine"
+	}
+	return name
 }
 
 func stripANSICodes(s string) string {

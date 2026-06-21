@@ -32,6 +32,8 @@ func TestHomeRendersIconStatsAndUsageBreakdowns(t *testing.T) {
 		t.Fatalf("home rendered the wrong page content: %s", body)
 	}
 	for _, want := range []string{
+		"<title>Umbragate</title>",
+		`<span class="brand">Umbragate</span>`,
 		`class="page-title"`,
 		`class="dashboard-metrics"`,
 		"tokensByProvider",
@@ -47,6 +49,11 @@ func TestHomeRendersIconStatsAndUsageBreakdowns(t *testing.T) {
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("home body does not contain %q", want)
+		}
+	}
+	for _, notWant := range []string{"Personal AI Router", ">AI Router</span>"} {
+		if strings.Contains(body, notWant) {
+			t.Fatalf("home body should not contain old brand %q: %s", notWant, body)
 		}
 	}
 }
@@ -68,6 +75,30 @@ func TestDashboardStaticModulesAreServed(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "vue.esm-browser.prod.js") {
 		t.Fatalf("static module missing Vue CDN import: %s", w.Body.String())
+	}
+}
+
+func TestProvidersModuleLoadsCodexIndependently(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "router.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer database.Close()
+
+	handler := New(database, nil)
+	req := httptest.NewRequest(http.MethodGet, "/dashboard/static/dashboard/providers.js", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "this.loadData();\n        this.loadCodexData();") {
+		t.Fatalf("providers module should load Codex independently: %s", body)
+	}
+	if strings.Contains(body, "await this.loadCodexData();") {
+		t.Fatalf("providers module should not depend on OpenCode load success: %s", body)
 	}
 }
 
@@ -110,7 +141,7 @@ func TestProvidersPageRendersManagementUI(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
 	}
 	body := w.Body.String()
-	for _, want := range []string{"class=\"page-title\">Providers", "Provider Analytics", "Management", "providerAnalyticsRange", "providerTokenChart", "providerSuccessChart", "providerAnalyticsContainer", "gateway forwarding", "providerTableContainer", "provider-management-table", "/dashboard/static/dashboard/providers.js", "@picocss/pico"} {
+	for _, want := range []string{"class=\"page-title\">Providers", "Provider Analytics", "Management", "Codex CLI", "providerAnalyticsRange", "providerTokenChart", "providerSuccessChart", "providerAnalyticsContainer", "gateway forwarding", "providerTableContainer", "provider-management-table", "codexTableContainer", "codex-management-table", "/dashboard/static/dashboard/providers.js", "@picocss/pico"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("providers page missing %q: %s", want, body)
 		}
@@ -188,6 +219,37 @@ func TestProviderConfigEndpointReturnsCatalogAndMaskedConfig(t *testing.T) {
 	}
 	if strings.Contains(body, "secret") {
 		t.Fatalf("body leaked api key: %s", body)
+	}
+}
+
+func TestCanonicalProviderIDNormalizesKnownDisplayNames(t *testing.T) {
+	cases := map[string]string{
+		"OpenCode Zen":   "opencode",
+		"GitHub Copilot": "github-copilot",
+		"Velcengine":     "volcengine",
+		"Volcengine":     "volcengine",
+	}
+	for name, want := range cases {
+		if got := canonicalProviderID(name); got != want {
+			t.Fatalf("canonicalProviderID(%q) = %q, want %q", name, got, want)
+		}
+	}
+}
+
+func TestProviderStatusesNormalizeKnownDisplayNames(t *testing.T) {
+	statuses := providerStatuses(map[string]any{
+		"provider": map[string]any{
+			"volcengine": map[string]any{
+				"name": "Velcengine",
+			},
+		},
+	}, []providerListEntry{{ID: "volcengine", Name: "Velcengine"}}, "http://127.0.0.1:4141")
+
+	if len(statuses) != 1 {
+		t.Fatalf("len(statuses) = %d, want 1", len(statuses))
+	}
+	if got := statuses[0].Name; got != "Volcengine" {
+		t.Fatalf("status name = %q, want Volcengine", got)
 	}
 }
 
@@ -359,5 +421,114 @@ func TestProviderGatewayRejectsMissingID(t *testing.T) {
 	handler.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400; body = %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCodexConfigEndpointReturnsGatewayStatus(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "router.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer database.Close()
+	dir := t.TempDir()
+	codexPath := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(codexPath, []byte(`model_provider = "openai"
+
+[model_providers.openai]
+name = "Umbragate OpenAI"
+base_url = "http://127.0.0.1:4141/openai/v1"
+env_key = "OPENAI_API_KEY"
+wire_api = "responses"
+`), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	gatewayCfgPath := filepath.Join(dir, "gateway.yaml")
+	if err := os.WriteFile(gatewayCfgPath, []byte("providers:\n  openai:\n    base_url: https://api.openai.com\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	gatewayCfg, err := config.Load(gatewayCfgPath)
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+	handler := newWithOptions(database, Options{CodexConfigPath: codexPath, GatewayBaseURL: "http://127.0.0.1:4141", GatewayConfig: gatewayCfg})
+
+	req := httptest.NewRequest(http.MethodGet, "/dashboard/codex/config", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	for _, want := range []string{`"providers"`, `"openai"`, `"active":true`, `"gateway_enabled":true`, `"env_key":"OPENAI_API_KEY"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("body missing %q: %s", want, body)
+		}
+	}
+}
+
+func TestCodexGatewayTogglesConfigAndGatewayProvider(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "router.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer database.Close()
+	dir := t.TempDir()
+	codexPath := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(codexPath, []byte(`model = "gpt-5.5"
+
+[features]
+js_repl = false
+`), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	gatewayCfgPath := filepath.Join(dir, "gateway.yaml")
+	if err := os.WriteFile(gatewayCfgPath, []byte("providers: {}\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	gatewayCfg, err := config.Load(gatewayCfgPath)
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+	handler := newWithOptions(database, Options{CodexConfigPath: codexPath, GatewayBaseURL: "http://127.0.0.1:4141", GatewayConfig: gatewayCfg})
+
+	enableReq := httptest.NewRequest(http.MethodPost, "/dashboard/codex/gateway", bytes.NewReader([]byte(`{"path":"`+codexPath+`","id":"openai","enabled":true}`)))
+	enableW := httptest.NewRecorder()
+	handler.ServeHTTP(enableW, enableReq)
+	if enableW.Code != http.StatusOK {
+		t.Fatalf("enable status = %d, body = %s", enableW.Code, enableW.Body.String())
+	}
+	written, err := os.ReadFile(codexPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	for _, want := range []string{`model_provider = "openai"`, `[model_providers.openai]`, `base_url = "http://127.0.0.1:4141/openai/v1"`, `[features]`} {
+		if !strings.Contains(string(written), want) {
+			t.Fatalf("codex config missing %q:\n%s", want, string(written))
+		}
+	}
+	p, ok := gatewayCfg.Provider("openai")
+	if !ok {
+		t.Fatal("gateway config.yaml missing provider after enable")
+	}
+	if p.Type != "" || p.BaseURL != "https://api.openai.com" {
+		t.Fatalf("gateway provider = %+v, want passthrough https://api.openai.com", p)
+	}
+
+	disableReq := httptest.NewRequest(http.MethodPost, "/dashboard/codex/gateway", bytes.NewReader([]byte(`{"path":"`+codexPath+`","id":"openai","enabled":false}`)))
+	disableW := httptest.NewRecorder()
+	handler.ServeHTTP(disableW, disableReq)
+	if disableW.Code != http.StatusOK {
+		t.Fatalf("disable status = %d, body = %s", disableW.Code, disableW.Body.String())
+	}
+	written2, err := os.ReadFile(codexPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if strings.Contains(string(written2), "model_provider") || strings.Contains(string(written2), "[model_providers.openai]") {
+		t.Fatalf("codex gateway config not removed:\n%s", string(written2))
+	}
+	if _, ok := gatewayCfg.Provider("openai"); !ok {
+		t.Fatal("codex disable should not delete the gateway upstream provider")
 	}
 }
