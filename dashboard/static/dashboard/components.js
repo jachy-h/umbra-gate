@@ -1,44 +1,4 @@
-import { getLang, setLang, t } from './i18n.js';
 import { formatNum, fmtDuration, fmtPercent, fmtTime } from './utils.js';
-
-export const AppHeader = {
-    props: ['active'],
-    data() {
-        return {
-            lang: getLang(),
-            items: [
-                { key: 'agents', labelKey: 'agents', fallback: 'Agents', href: '/dashboard/agents' },
-                { key: 'providers', labelKey: 'providers', fallback: 'Providers', href: '/dashboard/providers' },
-                { key: 'analytics', labelKey: 'analytics', fallback: 'Analytics', href: '/dashboard/analytics' },
-                { key: 'sessions', labelKey: 'sessions', href: '/dashboard/sessions' }
-            ]
-        };
-    },
-    computed: {
-        switchLabel() {
-            return t('switchLang');
-        }
-    },
-    methods: {
-        label(item) {
-            return t(item.labelKey) === item.labelKey ? (item.fallback || item.labelKey) : t(item.labelKey);
-        },
-        toggleLang() {
-            const nextLang = this.lang === 'en' ? 'zh' : 'en';
-            setLang(nextLang);
-            document.documentElement.lang = nextLang;
-            window.location.reload();
-        }
-    },
-    template: `
-        <nav>
-            <span class="brand">Umbragate</span>
-            <a v-for="item in items" :key="item.key" :href="item.href" :class="{ active: item.key === active }">{{ label(item) }}</a>
-            <span class="nav-spacer"></span>
-            <button id="languageToggle" class="lang-toggle" type="button" @click="toggleLang">{{ switchLabel }}</button>
-        </nav>
-    `
-};
 
 export const TimeRangeSelect = {
     props: ['modelValue', 'label', 'selectId', 'ariaLabel'],
@@ -205,7 +165,7 @@ export const RecentFailuresTable = {
     template: `
         <div>
             <div v-if="!rows.length" class="empty-state">{{ emptyText }}</div>
-            <table v-else>
+            <table v-else class="recent-failures-table">
                 <thead><tr><th>Time</th><th>Provider</th><th>Model</th><th>Error</th><th></th></tr></thead>
                 <tbody>
                     <tr v-for="row in rows" :key="row.id">

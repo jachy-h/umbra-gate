@@ -1,10 +1,13 @@
-import { createApp } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.prod.js';
-import { AppHeader } from './components.js';
+import { getLang, setLang, t } from './i18n.js';
 
-createApp({
-    components: { AppHeader },
-    data() {
-        return { active: document.getElementById('appHeader')?.dataset.active || '' };
-    },
-    template: `<app-header :active="active"></app-header>`
-}).mount('#appHeader');
+const lang = getLang();
+document.documentElement.lang = lang;
+
+const languageToggle = document.getElementById('languageToggle');
+if (languageToggle) {
+    languageToggle.textContent = t('switchLang');
+    languageToggle.addEventListener('click', () => {
+        setLang(lang === 'en' ? 'zh' : 'en');
+        window.location.reload();
+    });
+}

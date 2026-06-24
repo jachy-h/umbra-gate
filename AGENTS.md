@@ -11,6 +11,7 @@
 ## Development
 
 - This is a Go project. Prefer the existing package layout and keep changes focused.
+- For dashboard or frontend design decisions, read `design.md` first and treat it as the product design direction.
 - Run `go test ./...` after code changes.
 - Build locally with `go build -o umbragate .` when startup or packaging behavior changes.
 - The app serves the dashboard at `http://127.0.0.1:4141/dashboard` by default.

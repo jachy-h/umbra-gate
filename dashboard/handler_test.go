@@ -33,7 +33,8 @@ func TestHomeRendersIconStatsAndUsageBreakdowns(t *testing.T) {
 	}
 	for _, want := range []string{
 		"<title>Umbragate</title>",
-		`<span class="brand">Umbragate</span>`,
+		`href="/dashboard/static/dashboard/styles.css"`,
+		`<span class="brand-mark">U</span><span>Umbragate</span>`,
 		`class="page-title"`,
 		`class="dashboard-metrics"`,
 		"tokensByProvider",
@@ -145,12 +146,12 @@ func TestProvidersPageRendersManagementUI(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
 	}
 	body := w.Body.String()
-	for _, want := range []string{"class=\"page-title\">Providers", "Provider Analytics", "Gateway Providers", "New Provider", "Base URL", "providerAnalyticsRange", "providerTokenChart", "providerSuccessChart", "providerAnalyticsContainer", "/dashboard/static/dashboard/providers.js", "@picocss/pico"} {
+	for _, want := range []string{"class=\"page-title\">Providers", "Provider Analytics", "Gateway Providers", "New Provider", "Base URL", "providerAnalyticsRange", "providerTokenChart", "providerSuccessChart", "providerAnalyticsContainer", "/dashboard/static/dashboard/providers.js", "/dashboard/static/dashboard/styles.css"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("providers page missing %q: %s", want, body)
 		}
 	}
-	for _, notWant := range []string{"id=\"models\"", "<th>Type</th>", "Default Model", "Small Model", "Gateway</a>", "Step 1", "Step 2", "Step 3", "providerSelect", "editApiKey", "editBaseUrl", "previewBtn", "applyBtn", "saveBtn", "addBtn", "diffPreview", "Edit Gateway", "Codex CLI", "gateway forwarding", "providerTableContainer", "provider-management-table", "codexTableContainer", "codex-management-table"} {
+	for _, notWant := range []string{"@picocss/pico", "id=\"models\"", "<th>Type</th>", "Default Model", "Small Model", "Gateway</a>", "Step 1", "Step 2", "Step 3", "providerSelect", "editApiKey", "editBaseUrl", "previewBtn", "applyBtn", "saveBtn", "addBtn", "diffPreview", "Edit Gateway", "Codex CLI", "gateway forwarding", "providerTableContainer", "provider-management-table", "codexTableContainer", "codex-management-table"} {
 		if strings.Contains(body, notWant) {
 			t.Fatalf("providers page should not contain %q: %s", notWant, body)
 		}
