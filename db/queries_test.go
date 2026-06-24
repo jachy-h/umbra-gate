@@ -252,6 +252,79 @@ func TestGetOverviewStatsAggregatesRangeSummary(t *testing.T) {
 	}
 }
 
+func TestGetAnalyticsBreakdownByAgent(t *testing.T) {
+	database, err := Open(filepath.Join(t.TempDir(), "router.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer database.Close()
+
+	providerID, err := database.EnsureProvider("openai")
+	if err != nil {
+		t.Fatalf("EnsureProvider() error = %v", err)
+	}
+	for _, row := range []struct {
+		agent            string
+		promptTokens     int64
+		completionTokens int64
+		errMessage       *string
+	}{
+		{agent: "codex", promptTokens: 100, completionTokens: 50},
+		{agent: "codex", errMessage: stringPtr("upstream failed")},
+		{agent: "opencode", promptTokens: 10, completionTokens: 5},
+	} {
+		sessionID, err := database.CreateSessionWithMeta(providerID, "gpt-4o", SessionMeta{AgentID: row.agent, ProjectID: "project-a"})
+		if err != nil {
+			t.Fatalf("CreateSessionWithMeta() error = %v", err)
+		}
+		if err := database.CompleteSession(sessionID, row.promptTokens, row.completionTokens, 100, row.errMessage); err != nil {
+			t.Fatalf("CompleteSession() error = %v", err)
+		}
+	}
+
+	breakdown, err := database.GetAnalyticsBreakdown("7d", "agent")
+	if err != nil {
+		t.Fatalf("GetAnalyticsBreakdown() error = %v", err)
+	}
+	if len(breakdown) != 2 {
+		t.Fatalf("len(breakdown) = %d, want 2", len(breakdown))
+	}
+	if breakdown[0].Name != "codex" || breakdown[0].RequestCount != 2 || breakdown[0].TotalTokens != 150 || breakdown[0].SuccessCount != 1 || breakdown[0].ErrorCount != 1 {
+		t.Fatalf("breakdown[0] = %+v, want codex mixed stats", breakdown[0])
+	}
+	if breakdown[1].Name != "opencode" || breakdown[1].RequestCount != 1 || breakdown[1].TotalTokens != 15 || breakdown[1].SuccessRate != 1 {
+		t.Fatalf("breakdown[1] = %+v, want opencode success stats", breakdown[1])
+	}
+}
+
+func TestGetTimeSeriesBreakdownByAgent(t *testing.T) {
+	database, err := Open(filepath.Join(t.TempDir(), "router.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer database.Close()
+
+	providerID, err := database.EnsureProvider("openai")
+	if err != nil {
+		t.Fatalf("EnsureProvider() error = %v", err)
+	}
+	sessionID, err := database.CreateSessionWithMeta(providerID, "gpt-4o", SessionMeta{AgentID: "codex"})
+	if err != nil {
+		t.Fatalf("CreateSessionWithMeta() error = %v", err)
+	}
+	if err := database.CompleteSession(sessionID, 100, 50, 100, nil); err != nil {
+		t.Fatalf("CompleteSession() error = %v", err)
+	}
+
+	stats, err := database.GetTimeSeriesBreakdown("7d", "agent")
+	if err != nil {
+		t.Fatalf("GetTimeSeriesBreakdown() error = %v", err)
+	}
+	if len(stats) != 1 || stats[0].Name != "codex" || stats[0].RequestCount != 1 || stats[0].TotalTokens != 150 {
+		t.Fatalf("stats = %+v, want codex time series row", stats)
+	}
+}
+
 func TestGetFailureAnalyticsAggregatesFailures(t *testing.T) {
 	database, err := Open(filepath.Join(t.TempDir(), "router.db"))
 	if err != nil {
@@ -274,14 +347,18 @@ func TestGetFailureAnalyticsAggregatesFailures(t *testing.T) {
 		message    string
 		startedAt  string
 	}{
-		{providerID: openaiID, model: "gpt-4o", message: "context deadline exceeded", startedAt: "2026-06-17 12:03:00"},
-		{providerID: openaiID, model: "gpt-4o", message: "upstream returned 500", startedAt: "2026-06-17 12:02:00"},
-		{providerID: anthropicID, model: "claude", message: "connection refused", startedAt: "2026-06-17 12:01:00"},
+		{providerID: openaiID, model: "gpt-4o", message: "context deadline exceeded", startedAt: time.Now().Add(-3 * time.Minute).Format("2006-01-02 15:04:05")},
+		{providerID: openaiID, model: "gpt-4o", message: "upstream returned 500", startedAt: time.Now().Add(-4 * time.Minute).Format("2006-01-02 15:04:05")},
+		{providerID: anthropicID, model: "claude", message: "connection refused", startedAt: time.Now().Add(-5 * time.Minute).Format("2006-01-02 15:04:05")},
 	}
-	for _, row := range cases {
-		sessionID, err := database.CreateSession(row.providerID, row.model)
+	for i, row := range cases {
+		meta := SessionMeta{AgentID: "codex", Endpoint: "v1/responses"}
+		if i == 2 {
+			meta = SessionMeta{AgentID: "claude-code", Endpoint: "v1/messages"}
+		}
+		sessionID, err := database.CreateSessionWithMeta(row.providerID, row.model, meta)
 		if err != nil {
-			t.Fatalf("CreateSession(%s) error = %v", row.model, err)
+			t.Fatalf("CreateSessionWithMeta(%s) error = %v", row.model, err)
 		}
 		if err := database.CompleteSession(sessionID, 0, 0, 1000, stringPtr(row.message)); err != nil {
 			t.Fatalf("CompleteSession(%s) error = %v", row.model, err)
@@ -327,8 +404,14 @@ func TestGetFailureAnalyticsAggregatesFailures(t *testing.T) {
 	if len(analytics.Providers) != 2 || analytics.Providers[0].Name != "openai" || analytics.Providers[0].Count != 2 || analytics.Providers[1].Name != "anthropic" || analytics.Providers[1].Count != 1 {
 		t.Fatalf("Providers = %+v, want openai then anthropic", analytics.Providers)
 	}
+	if len(analytics.Agents) != 2 || analytics.Agents[0].Name != "codex" || analytics.Agents[0].Count != 2 || analytics.Agents[1].Name != "claude-code" || analytics.Agents[1].Count != 1 {
+		t.Fatalf("Agents = %+v, want codex then claude-code", analytics.Agents)
+	}
 	if len(analytics.Models) != 2 || analytics.Models[0].Name != "gpt-4o" || analytics.Models[0].Count != 2 || analytics.Models[1].Name != "claude" || analytics.Models[1].Count != 1 {
 		t.Fatalf("Models = %+v, want gpt-4o then claude", analytics.Models)
+	}
+	if len(analytics.Endpoints) != 2 || analytics.Endpoints[0].Name != "v1/responses" || analytics.Endpoints[0].Count != 2 || analytics.Endpoints[1].Name != "v1/messages" || analytics.Endpoints[1].Count != 1 {
+		t.Fatalf("Endpoints = %+v, want responses then messages", analytics.Endpoints)
 	}
 	if len(analytics.Recent) != 3 || analytics.Recent[0].ErrorMessage == nil || *analytics.Recent[0].ErrorMessage != "context deadline exceeded" {
 		t.Fatalf("Recent = %+v, want newest failure first", analytics.Recent)

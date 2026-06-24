@@ -17,6 +17,14 @@ type Proxy struct {
 	client *http.Client
 }
 
+type routeContext struct {
+	AgentID       string
+	ProviderName  string
+	RemainingPath string
+	Endpoint      string
+	ProjectID     string
+}
+
 func New(cfg *config.Config, database *db.DB) *Proxy {
 	return &Proxy{
 		cfg: cfg,
@@ -28,41 +36,55 @@ func New(cfg *config.Config, database *db.DB) *Proxy {
 }
 
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/")
-	parts := strings.SplitN(path, "/", 2)
-	if len(parts) == 0 || parts[0] == "" {
+	route, ok := parseRoute(r)
+	if !ok {
 		http.NotFound(w, r)
 		return
 	}
 
-	providerName := parts[0]
-	providerCfg, ok := p.cfg.Provider(providerName)
+	providerCfg, ok := p.cfg.Provider(route.ProviderName)
 	if !ok {
-		slog.Warn("unknown provider", "provider", providerName)
+		slog.Warn("unknown provider", "provider", route.ProviderName, "agent", route.AgentID)
 		http.Error(w, "unknown provider", http.StatusNotFound)
 		return
 	}
-
-	remainingPath := ""
-	if len(parts) > 1 {
-		remainingPath = parts[1]
-	}
-
-	upstream, err := buildUpstreamURL(providerCfg.BaseURL, remainingPath, r.URL.RawQuery)
+	upstream, err := buildUpstreamURL(providerCfg.BaseURL, route.RemainingPath, r.URL.RawQuery)
 	if err != nil {
-		slog.Error("invalid provider base_url", "provider", providerName, "error", err)
+		slog.Error("invalid provider base_url", "provider", route.ProviderName, "agent", route.AgentID, "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
-	switch providerCfg.Type {
-	case config.ProviderTypeOpenAI:
-		p.handleOpenAI(w, r, providerName, &providerCfg, upstream)
-	case config.ProviderTypeAnthropic:
-		p.handleAnthropic(w, r, providerName, &providerCfg, upstream)
-	default:
-		p.handlePassthrough(w, r, providerName, &providerCfg, upstream)
+	p.handlePassthrough(w, r, route, &providerCfg, upstream)
+}
+
+func parseRoute(r *http.Request) (routeContext, bool) {
+	path := strings.TrimPrefix(r.URL.Path, "/")
+	parts := strings.Split(path, "/")
+	if len(parts) == 0 || parts[0] == "" {
+		return routeContext{}, false
 	}
+	route := routeContext{
+		AgentID:   "unknown",
+		ProjectID: strings.TrimSpace(r.Header.Get("X-Umbra-Project")),
+	}
+	if parts[0] == "a" {
+		if len(parts) < 3 || strings.TrimSpace(parts[1]) == "" || strings.TrimSpace(parts[2]) == "" {
+			return routeContext{}, false
+		}
+		route.AgentID = strings.TrimSpace(parts[1])
+		route.ProviderName = strings.TrimSpace(parts[2])
+		if len(parts) > 3 {
+			route.RemainingPath = strings.Join(parts[3:], "/")
+		}
+	} else {
+		route.ProviderName = strings.TrimSpace(parts[0])
+		if len(parts) > 1 {
+			route.RemainingPath = strings.Join(parts[1:], "/")
+		}
+	}
+	route.Endpoint = route.RemainingPath
+	return route, route.ProviderName != ""
 }
 
 // buildUpstreamURL safely joins the provider base URL with the client-supplied

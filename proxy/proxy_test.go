@@ -73,7 +73,6 @@ func newTestConfig(t *testing.T, providerID string, p config.ProviderConfig) *co
 func TestProxyOpenAIPathJoinAndAuth(t *testing.T) {
 	upstream, captured := newFakeUpstream(t, 200, `{"model":"gpt-4o","usage":{"prompt_tokens":10,"completion_tokens":20,"total_tokens":30}}`)
 	cfg := newTestConfig(t, "openai", config.ProviderConfig{
-		Type:      config.ProviderTypeOpenAI,
 		BaseURL:   upstream.URL + "/v1/", // trailing slash should be tolerated
 		APIKey:    "sk-real",
 		APIKeyRaw: "sk-real",
@@ -97,8 +96,8 @@ func TestProxyOpenAIPathJoinAndAuth(t *testing.T) {
 	if got := captured.url.RawQuery; got != "foo=bar" {
 		t.Errorf("query = %q, want foo=bar", got)
 	}
-	if got := captured.headers.Get("Authorization"); got != "Bearer sk-real" {
-		t.Errorf("Authorization = %q, want Bearer sk-real (gateway must replace client key)", got)
+	if got := captured.headers.Get("Authorization"); got != "Bearer client-fake" {
+		t.Errorf("Authorization = %q, want client key preserved", got)
 	}
 	if got := captured.headers.Get("X-Custom"); got != "forwarded" {
 		t.Errorf("client header X-Custom not forwarded: %q", got)
@@ -108,10 +107,76 @@ func TestProxyOpenAIPathJoinAndAuth(t *testing.T) {
 	}
 }
 
+func TestProxyAgentAwareRouteRecordsAttribution(t *testing.T) {
+	upstream, captured := newFakeUpstream(t, 200, `{"model":"gpt-4o","usage":{"prompt_tokens":10,"completion_tokens":20,"total_tokens":30}}`)
+	cfg := newTestConfig(t, "openai", config.ProviderConfig{
+		BaseURL:   upstream.URL,
+		APIKey:    "sk-real",
+		APIKeyRaw: "sk-real",
+	})
+	database := newTestDB(t)
+	p := New(cfg, database)
+
+	req := httptest.NewRequest("POST", "/a/codex/openai/v1/responses?foo=bar", strings.NewReader(`{"model":"gpt-4o"}`))
+	req.Header.Set("X-Umbra-Project", "gateway-redesign")
+	w := httptest.NewRecorder()
+	p.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	if got := captured.url.Path; got != "/v1/responses" {
+		t.Fatalf("upstream path = %q, want /v1/responses", got)
+	}
+
+	sessions, err := database.ListSessions(10, 0)
+	if err != nil {
+		t.Fatalf("ListSessions() error = %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("len(sessions) = %d, want 1", len(sessions))
+	}
+	got := sessions[0]
+	if got.AgentID != "codex" || got.ProjectID != "gateway-redesign" || got.ProviderName != "openai" {
+		t.Fatalf("session attribution = %+v, want codex/gateway-redesign/openai", got)
+	}
+	if got.Endpoint != "v1/responses" || got.Stream {
+		t.Fatalf("session route fields = %+v, want endpoint v1/responses and stream false", got)
+	}
+}
+
+func TestProxyLegacyRouteRecordsUnknownAgent(t *testing.T) {
+	upstream, _ := newFakeUpstream(t, 200, `{"model":"gpt-4o","usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}`)
+	cfg := newTestConfig(t, "openai", config.ProviderConfig{
+		BaseURL:   upstream.URL,
+		APIKey:    "sk-real",
+		APIKeyRaw: "sk-real",
+	})
+	database := newTestDB(t)
+	p := New(cfg, database)
+
+	req := httptest.NewRequest("POST", "/openai/v1/responses", strings.NewReader(`{"model":"gpt-4o"}`))
+	w := httptest.NewRecorder()
+	p.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	sessions, err := database.ListSessions(10, 0)
+	if err != nil {
+		t.Fatalf("ListSessions() error = %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("len(sessions) = %d, want 1", len(sessions))
+	}
+	if sessions[0].AgentID != "unknown" || sessions[0].Endpoint != "v1/responses" {
+		t.Fatalf("session = %+v, want unknown agent and endpoint v1/responses", sessions[0])
+	}
+}
+
 func TestProxyAnthropicPathJoinAndAuth(t *testing.T) {
 	upstream, captured := newFakeUpstream(t, 200, `{"model":"claude","usage":{"input_tokens":5,"output_tokens":7}}`)
 	cfg := newTestConfig(t, "anthropic", config.ProviderConfig{
-		Type:      config.ProviderTypeAnthropic,
 		BaseURL:   upstream.URL,
 		APIKey:    "ak-real",
 		APIKeyRaw: "ak-real",
@@ -130,11 +195,11 @@ func TestProxyAnthropicPathJoinAndAuth(t *testing.T) {
 	if got := captured.url.Path; got != "/v1/messages" {
 		t.Errorf("upstream path = %q", got)
 	}
-	if got := captured.headers.Get("x-api-key"); got != "ak-real" {
-		t.Errorf("x-api-key = %q, want ak-real", got)
+	if got := captured.headers.Get("x-api-key"); got != "client-fake" {
+		t.Errorf("x-api-key = %q, want client key preserved", got)
 	}
-	if got := captured.headers.Get("anthropic-version"); got == "" {
-		t.Errorf("anthropic-version should be auto-injected")
+	if got := captured.headers.Get("anthropic-version"); got != "" {
+		t.Errorf("anthropic-version should not be auto-injected, got %q", got)
 	}
 	if got := captured.headers.Get("Authorization"); got != "" {
 		t.Errorf("Authorization should not be set for anthropic, got %q", got)
@@ -144,7 +209,6 @@ func TestProxyAnthropicPathJoinAndAuth(t *testing.T) {
 func TestProxyAnthropicRespectsClientVersion(t *testing.T) {
 	upstream, captured := newFakeUpstream(t, 200, `{}`)
 	cfg := newTestConfig(t, "anthropic", config.ProviderConfig{
-		Type:      config.ProviderTypeAnthropic,
 		BaseURL:   upstream.URL,
 		APIKey:    "ak",
 		APIKeyRaw: "ak",
@@ -164,7 +228,6 @@ func TestProxyAnthropicRespectsClientVersion(t *testing.T) {
 func TestProxyHopByHopHeadersStripped(t *testing.T) {
 	upstream, captured := newFakeUpstream(t, 200, `{}`)
 	cfg := newTestConfig(t, "openai", config.ProviderConfig{
-		Type:      config.ProviderTypeOpenAI,
 		BaseURL:   upstream.URL,
 		APIKey:    "sk",
 		APIKeyRaw: "sk",
@@ -187,7 +250,6 @@ func TestProxyHopByHopHeadersStripped(t *testing.T) {
 
 func TestProxyUnknownProvider(t *testing.T) {
 	cfg := newTestConfig(t, "ignored", config.ProviderConfig{
-		Type:      config.ProviderTypeOpenAI,
 		BaseURL:   "https://example.com",
 		APIKey:    "k",
 		APIKeyRaw: "k",
@@ -232,7 +294,6 @@ func TestProxyDefaultForwardingPreservesClientAuthorization(t *testing.T) {
 func TestProxyConfigChangesAreLiveReloaded(t *testing.T) {
 	upstream, captured := newFakeUpstream(t, 200, `{}`)
 	cfg := newTestConfig(t, "openai", config.ProviderConfig{
-		Type:      config.ProviderTypeOpenAI,
 		BaseURL:   upstream.URL,
 		APIKey:    "sk-old",
 		APIKeyRaw: "sk-old",
@@ -241,7 +302,6 @@ func TestProxyConfigChangesAreLiveReloaded(t *testing.T) {
 
 	// Mutate after construction
 	if err := cfg.UpsertProvider("openai", config.ProviderConfig{
-		Type:      config.ProviderTypeOpenAI,
 		BaseURL:   upstream.URL,
 		APIKey:    "sk-new",
 		APIKeyRaw: "sk-new",
@@ -252,15 +312,14 @@ func TestProxyConfigChangesAreLiveReloaded(t *testing.T) {
 	req := httptest.NewRequest("POST", "/openai/chat/completions", strings.NewReader(`{}`))
 	w := httptest.NewRecorder()
 	p.ServeHTTP(w, req)
-	if got := captured.headers.Get("Authorization"); got != "Bearer sk-new" {
-		t.Errorf("did not pick up updated key: %q", got)
+	if got := captured.headers.Get("Authorization"); got != "" {
+		t.Errorf("gateway should not inject updated key: %q", got)
 	}
 }
 
 func TestProxyForwardsUpstreamErrorBody(t *testing.T) {
 	upstream, _ := newFakeUpstream(t, 401, `{"error":"bad key"}`)
 	cfg := newTestConfig(t, "openai", config.ProviderConfig{
-		Type:      config.ProviderTypeOpenAI,
 		BaseURL:   upstream.URL,
 		APIKey:    "k",
 		APIKeyRaw: "k",

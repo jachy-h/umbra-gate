@@ -82,11 +82,10 @@
     <div id="appHeader" data-active="{{.Active}}">
         <nav class="vue-fallback">
             <span class="brand">Umbragate</span>
-            <a href="/dashboard" class="{{if eq .Active "home"}}active{{end}}" data-i18n="home">Home</a>
-            <a href="/dashboard/sessions" class="{{if eq .Active "sessions"}}active{{end}}" data-i18n="sessions">Sessions</a>
-            <a href="/dashboard/models" class="{{if eq .Active "models"}}active{{end}}" data-i18n="models">Models</a>
+            <a href="/dashboard/agents" class="{{if eq .Active "agents"}}active{{end}}">Agents</a>
             <a href="/dashboard/providers" class="{{if eq .Active "providers"}}active{{end}}">Providers</a>
-            <a href="/dashboard/failures" class="{{if eq .Active "failures"}}active{{end}}">Failures</a>
+            <a href="/dashboard/analytics" class="{{if eq .Active "analytics"}}active{{end}}">Analytics</a>
+            <a href="/dashboard/sessions" class="{{if eq .Active "sessions"}}active{{end}}" data-i18n="sessions">Sessions</a>
             <span class="nav-spacer"></span>
             <button id="languageToggle" class="lang-toggle" type="button">中文</button>
         </nav>

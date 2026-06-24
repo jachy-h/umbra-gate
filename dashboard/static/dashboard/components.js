@@ -7,11 +7,10 @@ export const AppHeader = {
         return {
             lang: getLang(),
             items: [
-                { key: 'home', labelKey: 'home', href: '/dashboard' },
-                { key: 'sessions', labelKey: 'sessions', href: '/dashboard/sessions' },
-                { key: 'models', labelKey: 'models', href: '/dashboard/models' },
+                { key: 'agents', labelKey: 'agents', fallback: 'Agents', href: '/dashboard/agents' },
                 { key: 'providers', labelKey: 'providers', fallback: 'Providers', href: '/dashboard/providers' },
-                { key: 'failures', labelKey: 'failures', fallback: 'Failures', href: '/dashboard/failures' }
+                { key: 'analytics', labelKey: 'analytics', fallback: 'Analytics', href: '/dashboard/analytics' },
+                { key: 'sessions', labelKey: 'sessions', href: '/dashboard/sessions' }
             ]
         };
     },
@@ -228,15 +227,17 @@ export const SessionTable = {
     template: `
         <table>
             <thead>
-                <tr><th>Time</th><th>Provider</th><th>Model</th><th>Tokens</th><th>Duration</th><th>Status</th><th></th></tr>
+                <tr><th>Time</th><th>Agent</th><th>Provider</th><th>Model</th><th>Project</th><th>Tokens</th><th>Duration</th><th>Status</th><th></th></tr>
             </thead>
             <tbody>
-                <tr v-if="sessions === null"><td colspan="7">Loading...</td></tr>
-                <tr v-else-if="!sessions.length"><td colspan="7">No sessions yet.</td></tr>
+                <tr v-if="sessions === null"><td colspan="9">Loading...</td></tr>
+                <tr v-else-if="!sessions.length"><td colspan="9">No sessions yet.</td></tr>
                 <tr v-for="session in sessions" :key="session.id">
                     <td>{{ fmtTime(session.started_at) }}</td>
+                    <td>{{ session.agent_id || 'unknown' }}</td>
                     <td>{{ session.provider_name }}</td>
                     <td>{{ session.model }}</td>
+                    <td>{{ session.project_id || 'unknown' }}</td>
                     <td>{{ formatNum((session.prompt_tokens || 0) + (session.completion_tokens || 0)) }}</td>
                     <td>{{ fmtDuration(session.duration_ms || 0) }}</td>
                     <td><span :class="['badge', 'badge-' + session.status]">{{ session.status }}</span></td>

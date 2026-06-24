@@ -1,0 +1,102 @@
+{{define "content"}}
+<div id="analyticsApp">
+    <div class="analytics-page">
+        <aside class="analytics-outline" aria-label="Analytics outline">
+            <a href="#overview">Overview</a>
+            <a href="#agent">Agent</a>
+            <a href="#provider">Provider</a>
+            <a href="#model">Model</a>
+            <a href="#project">Project</a>
+            <a href="#endpoint">Endpoint</a>
+            <a href="#status">Status</a>
+        </aside>
+
+        <div class="analytics-content">
+            <section id="overview" class="card analytics-section">
+                <div class="analytics-section-header">
+                    <h2>Overview</h2>
+                    <span class="analytics-range">Last 7 days</span>
+                </div>
+                <div class="analytics-summary">
+                    <div class="metric-item">
+                        <div class="label">Requests</div>
+                        <div class="value" v-text="formatNum(overview.total_requests)"></div>
+                    </div>
+                    <div class="metric-item">
+                        <div class="label">Tokens</div>
+                        <div class="value" v-text="formatNum(overview.total_tokens)"></div>
+                    </div>
+                    <div class="metric-item">
+                        <div class="label">Success Rate</div>
+                        <div class="value" v-text="fmtPercent(overview.success_rate)"></div>
+                    </div>
+                    <div class="metric-item">
+                        <div class="label">P95 Latency</div>
+                        <div class="value" v-text="fmtDuration(overview.p95_duration_ms)"></div>
+                    </div>
+                </div>
+            </section>
+
+            <section v-for="section in sections" :id="section.key" :key="section.key" class="card analytics-section">
+                <div class="analytics-section-header">
+                    <h2 v-text="section.title"></h2>
+                    <span class="analytics-range">Last 7 days</span>
+                </div>
+                <div v-if="loading[section.key]" class="empty-state">Loading analytics...</div>
+                <div v-else-if="!rows(section.key).length" class="empty-state">No usage yet.</div>
+                <template v-else>
+                    <div class="analytics-charts">
+                        <div v-for="chart in section.charts" :key="section.key + ':' + chart.key" class="analytics-chart-card">
+                            <div class="analytics-chart-title" v-text="chart.title"></div>
+                            <div v-if="!chartRows(section.key, chart.metric).length" class="empty-state">No chart data.</div>
+                            <div v-else class="analytics-chart"><canvas :id="chartID(section.key, chart.key)"></canvas></div>
+                        </div>
+                    </div>
+                    <table>
+                        <thead><tr><th>Name</th><th>Requests</th><th>Tokens</th><th>Avg Latency</th><th>Success</th><th>Errors</th></tr></thead>
+                        <tbody>
+                            <tr v-for="row in rows(section.key)" :key="section.key + ':' + row.name">
+                                <td v-text="row.name"></td>
+                                <td v-text="formatNum(row.request_count)"></td>
+                                <td v-text="formatNum(row.total_tokens)"></td>
+                                <td v-text="fmtDuration(row.avg_duration_ms)"></td>
+                                <td v-text="fmtPercent(row.success_rate)"></td>
+                                <td v-text="formatNum(row.error_count)"></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </template>
+            </section>
+        </div>
+    </div>
+</div>
+
+<style>
+#analyticsApp { height:calc(100vh - 120px); display:flex; flex-direction:column; min-height:0; }
+#analyticsApp .page-title { flex:0 0 auto; }
+.analytics-page { flex:1 1 auto; min-height:0; display:grid; grid-template-columns:180px minmax(0, 1fr); gap:16px; align-items:stretch; }
+.analytics-outline { align-self:start; max-height:100%; overflow:auto; display:flex; flex-direction:column; gap:2px; padding:10px; border:1px solid #eef2f7; border-radius:8px; background:#fff; box-shadow:0 8px 22px rgba(15, 23, 42, 0.05); }
+.analytics-outline a { display:block; padding:8px 10px; border-radius:6px; color:#4b5563; font-size:13px; text-decoration:none; }
+.analytics-outline a:hover { background:#f3f4f6; color:#111827; }
+.analytics-content { min-height:0; min-width:0; overflow:auto; display:grid; gap:16px; align-content:start; padding-right:4px; }
+.analytics-section { scroll-margin-top:12px; }
+.analytics-charts { display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:12px; margin-bottom:18px; }
+.analytics-chart-card { min-width:0; border:1px solid #eef2f7; border-radius:10px; padding:12px; background:#fff; }
+.analytics-chart-title { color:#374151; font-size:13px; font-weight:700; margin-bottom:10px; }
+.analytics-chart { height:240px; min-height:240px; position:relative; }
+.analytics-chart canvas { width:100% !important; height:100% !important; }
+.analytics-section table { min-width:780px; }
+.analytics-section-header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px; }
+.analytics-section-header h2 { margin:0; }
+.analytics-range { color:#6b7280; font-size:12px; font-weight:700; text-transform:uppercase; white-space:nowrap; }
+.analytics-summary { display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:12px; }
+@media (max-width: 860px) {
+    #analyticsApp { height:calc(100vh - 96px); }
+    .analytics-page { grid-template-columns:1fr; grid-template-rows:auto minmax(0, 1fr); }
+    .analytics-outline { max-height:none; flex-direction:row; overflow:auto; }
+    .analytics-outline a { white-space:nowrap; }
+}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script type="module" src="/dashboard/static/dashboard/analytics.js"></script>
+{{end}}

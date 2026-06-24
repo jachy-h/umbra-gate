@@ -23,7 +23,6 @@ func TestLoadValidConfig(t *testing.T) {
 listen: "127.0.0.1:5000"
 providers:
   volcengine:
-    type: openai
     base_url: https://ark.example.com/v3/
     api_key: ${VOLC_KEY}
 `)
@@ -37,9 +36,6 @@ providers:
 	p, ok := cfg.Provider("volcengine")
 	if !ok {
 		t.Fatalf("provider missing")
-	}
-	if p.Type != ProviderTypeOpenAI {
-		t.Errorf("type = %q, want %q", p.Type, ProviderTypeOpenAI)
 	}
 	if p.BaseURL != "https://ark.example.com/v3" {
 		t.Errorf("base_url = %q (should trim trailing slash)", p.BaseURL)
@@ -70,7 +66,6 @@ func TestLoadFailsOnMissingEnv(t *testing.T) {
 	path := writeTempConfig(t, `
 providers:
   p1:
-    type: openai
     base_url: https://api.example.com
     api_key: ${MISSING_KEY_XYZ}
 `)
@@ -83,7 +78,7 @@ providers:
 	}
 }
 
-func TestLoadFailsOnUnknownType(t *testing.T) {
+func TestLoadIgnoresLegacyType(t *testing.T) {
 	path := writeTempConfig(t, `
 providers:
   p1:
@@ -91,9 +86,12 @@ providers:
     base_url: https://api.example.com
     api_key: x
 `)
-	_, err := Load(path)
-	if err == nil {
-		t.Fatalf("expected error for unknown type")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if _, ok := cfg.Provider("p1"); !ok {
+		t.Fatalf("provider missing")
 	}
 }
 
@@ -102,13 +100,11 @@ func TestLoadFailsOnMissingFields(t *testing.T) {
 		"missing base_url": `
 providers:
   p1:
-    type: openai
     api_key: x
 `,
 		"invalid base_url": `
 providers:
   p1:
-    type: openai
     base_url: "://broken"
     api_key: x
 `,
@@ -137,9 +133,6 @@ providers:
 	if !ok {
 		t.Fatalf("provider missing")
 	}
-	if p.Type != "" {
-		t.Errorf("type = %q, want empty", p.Type)
-	}
 	if p.BaseURL != "https://opencode.ai/zen/v1" {
 		t.Errorf("base_url = %q", p.BaseURL)
 	}
@@ -148,7 +141,7 @@ providers:
 	}
 }
 
-func TestLoadAcceptsAnthropicType(t *testing.T) {
+func TestLoadAcceptsLegacyAnthropicType(t *testing.T) {
 	path := writeTempConfig(t, `
 providers:
   ant:
@@ -161,9 +154,6 @@ providers:
 		t.Fatalf("Load: %v", err)
 	}
 	p, _ := cfg.Provider("ant")
-	if p.Type != ProviderTypeAnthropic {
-		t.Errorf("type = %q", p.Type)
-	}
 	if p.APIKey != "literal-key" || p.APIKeyRaw != "literal-key" {
 		t.Errorf("literal key handling wrong: api_key=%q raw=%q", p.APIKey, p.APIKeyRaw)
 	}
@@ -175,7 +165,6 @@ func TestSaveRoundTripPreservesEnvRef(t *testing.T) {
 listen: "127.0.0.1:5000"
 providers:
   volcengine:
-    type: openai
     base_url: https://ark.example.com/v3
     api_key: ${VOLC_KEY}
 `)
@@ -207,7 +196,6 @@ providers: {}
 		t.Fatalf("Load: %v", err)
 	}
 	err = cfg.UpsertProvider("openai", ProviderConfig{
-		Type:      ProviderTypeOpenAI,
 		BaseURL:   "https://api.openai.com/",
 		APIKey:    "sk-real",
 		APIKeyRaw: "sk-real",
@@ -245,9 +233,8 @@ func TestUpsertProviderRejectsInvalid(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	cases := map[string]ProviderConfig{
-		"bad type":       {Type: "junk", BaseURL: "https://x", APIKey: "k", APIKeyRaw: "k"},
-		"empty base_url": {Type: ProviderTypeOpenAI, APIKey: "k", APIKeyRaw: "k"},
-		"bad base_url":   {Type: ProviderTypeOpenAI, BaseURL: "://x", APIKey: "k", APIKeyRaw: "k"},
+		"empty base_url": {APIKey: "k", APIKeyRaw: "k"},
+		"bad base_url":   {BaseURL: "://x", APIKey: "k", APIKeyRaw: "k"},
 	}
 	for name, p := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -256,7 +243,7 @@ func TestUpsertProviderRejectsInvalid(t *testing.T) {
 			}
 		})
 	}
-	if err := cfg.UpsertProvider("", ProviderConfig{Type: ProviderTypeOpenAI, BaseURL: "https://x", APIKey: "k", APIKeyRaw: "k"}); err == nil {
+	if err := cfg.UpsertProvider("", ProviderConfig{BaseURL: "https://x", APIKey: "k", APIKeyRaw: "k"}); err == nil {
 		t.Errorf("empty id should error")
 	}
 }
@@ -265,11 +252,9 @@ func TestProviderIDsSorted(t *testing.T) {
 	path := writeTempConfig(t, `
 providers:
   zeta:
-    type: openai
     base_url: https://a
     api_key: k
   alpha:
-    type: openai
     base_url: https://b
     api_key: k
 `)
@@ -299,7 +284,7 @@ func TestConcurrentReadWrite(t *testing.T) {
 	}()
 	for i := 0; i < 100; i++ {
 		_ = cfg.UpsertProvider("x", ProviderConfig{
-			Type: ProviderTypeOpenAI, BaseURL: "https://x", APIKey: "k", APIKeyRaw: "k",
+			BaseURL: "https://x", APIKey: "k", APIKeyRaw: "k",
 		})
 	}
 	<-done

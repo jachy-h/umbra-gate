@@ -7,12 +7,11 @@ Client ──► 127.0.0.1:4141 ──► ServeMux
                                   │
                     ┌─────────────┼─────────────┐
                     │             │             │
-                /api/*        /dashboard    /<provider>/*
+                /api/*        /dashboard    /a/<agent>/<provider>/*
               (api.Handler) (dashboard.    (proxy.Proxy)
                               Handler)         │
-                                         ┌─────┴─────┐
-                                     OpenAI       Anthropic
-                                   (openai.go)  (anthropic.go)
+                                         │
+                                  passthrough proxy
                                          │
                                     upstream API
 ```
@@ -23,13 +22,13 @@ Client ──► 127.0.0.1:4141 ──► ServeMux
 ├── main.go              Entry point, graceful shutdown
 ├── config.yaml          Default configuration
 ├── config/config.go     YAML config loading
+├── agents/              Agent-specific config managers
 ├── db/
 │   ├── db.go            SQLite connection, migrations, WAL mode
 │   └── queries.go       CRUD operations, stats aggregation
 ├── proxy/
 │   ├── proxy.go         HTTP routing by path prefix to provider
-│   ├── openai.go        OpenAI-compatible handler (stream + non-stream)
-│   └── anthropic.go     Anthropic handler (stream + non-stream)
+│   └── passthrough.go   Transparent forwarding and request accounting
 ├── api/
 │   └── handler.go       JSON API: stats, sessions, models
 └── dashboard/
@@ -39,23 +38,21 @@ Client ──► 127.0.0.1:4141 ──► ServeMux
 
 ## Key Design Decisions
 
-- **Path-prefix routing**: Provider identified by first URL segment (`/openai/...`, `/anthropic/...`)
-- **Protocol switch**: Each provider has a `protocol` field; proxy dispatches to the correct handler
+- **Agent-aware routing**: New clients use `/a/{agent}/{provider}/...`; legacy `/{provider}/...` remains supported and records `agent_id=unknown`
+- **Transparent forwarding**: All providers use the same passthrough path; client headers and bodies are forwarded without provider-specific mutation
 - **SSE streaming**: Chunks forwarded immediately via `http.Flusher`; leftover buffer handles line-boundary splits
 - **SQLite WAL mode**: Enables concurrent reads (dashboard) while writes (proxy) are in progress
 - **Zero cloud dependencies**: Only `gopkg.in/yaml.v3` and `modernc.org/sqlite` (pure Go)
 
-## Adding a New Provider Protocol
+## Adding a New Provider
 
-1. Add the provider to `config.yaml` with appropriate `protocol` value
-2. Create a new handler file (e.g., `proxy/google.go`)
-3. Implement `handle<Name>` + `proxy<Name>NonStream` + `proxy<Name>Stream`
-4. Add the protocol case in `proxy/proxy.go`'s `ServeHTTP` switch
+Add the provider to `config.yaml` with a `base_url`. The client request path is
+appended to that base URL and forwarded through the shared passthrough proxy.
 
 ## Sessions & Requests
 
 - One session = one API call (MVP simplification)
-- Session created on request start (`status: pending`)
+- Session created on request start (`status: pending`) with agent, provider, model, project, endpoint, and stream attribution
 - Session completed on response finish (`status: success/error`)
 - Request record created per session (for future multi-request sessions)
 
@@ -78,6 +75,10 @@ Tests use `httptest` for proxy routing validation, no real upstream needed.
 ## Configuration
 
 Config is loaded from `UMBRAGATE_HOME/config.yaml` when `UMBRAGATE_HOME` is set, otherwise from `./config.yaml` if present in the working directory, otherwise from `~/.umbragate/config.yaml`. On startup the app creates a default `config.yaml` when missing. All providers are optional — add only what you need.
+
+## Client Proxy Notes
+
+- [Claude Code and Codex proxy notes](claude-code-codex-proxy-notes.md) records how to point those clients at Umbragate and what config-management pieces are still needed.
 
 ## Database
 

@@ -15,31 +15,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-type ProviderType string
-
-const (
-	ProviderTypeOpenAI    ProviderType = "openai"
-	ProviderTypeAnthropic ProviderType = "anthropic"
-)
-
-func (t ProviderType) Valid() bool {
-	if t == "" {
-		return true
-	}
-	switch t {
-	case ProviderTypeOpenAI, ProviderTypeAnthropic:
-		return true
-	}
-	return false
-}
-
 // ProviderConfig is the in-memory provider definition.
 //
 // APIKey holds the resolved (env-expanded) value used at request time.
 // APIKeyRaw holds the original literal — including ${ENV} references — so we
 // can round-trip through Save without leaking secrets into the YAML file.
 type ProviderConfig struct {
-	Type      ProviderType
 	BaseURL   string
 	APIKey    string
 	APIKeyRaw string
@@ -64,7 +45,6 @@ type rawConfig struct {
 }
 
 type rawProviderConfig struct {
-	Type    string `yaml:"type"`
 	BaseURL string `yaml:"base_url"`
 	APIKey  string `yaml:"api_key"`
 }
@@ -99,10 +79,6 @@ func Load(path string) (*Config, error) {
 }
 
 func buildProvider(rp rawProviderConfig) (ProviderConfig, error) {
-	pt := ProviderType(strings.TrimSpace(rp.Type))
-	if !pt.Valid() {
-		return ProviderConfig{}, fmt.Errorf("unknown type %q (must be openai, anthropic, or empty)", rp.Type)
-	}
 	baseURL := strings.TrimSpace(rp.BaseURL)
 	if baseURL == "" {
 		return ProviderConfig{}, errors.New("base_url is required")
@@ -121,7 +97,6 @@ func buildProvider(rp rawProviderConfig) (ProviderConfig, error) {
 		}
 	}
 	return ProviderConfig{
-		Type:      pt,
 		BaseURL:   baseURL,
 		APIKey:    resolved,
 		APIKeyRaw: rawKey,
@@ -188,7 +163,6 @@ func (c *Config) UpsertProvider(id string, p ProviderConfig) error {
 		return errors.New("provider id is required")
 	}
 	validated, err := buildProvider(rawProviderConfig{
-		Type:    string(p.Type),
 		BaseURL: p.BaseURL,
 		APIKey:  firstNonEmpty(p.APIKeyRaw, p.APIKey),
 	})
@@ -224,7 +198,6 @@ func (c *Config) Save() error {
 	}
 	for id, p := range c.providers {
 		raw.Providers[id] = rawProviderConfig{
-			Type:    string(p.Type),
 			BaseURL: p.BaseURL,
 			APIKey:  p.APIKeyRaw,
 		}

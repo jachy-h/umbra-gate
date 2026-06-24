@@ -115,11 +115,11 @@ func TestPlanGatewayToggleSetsAndRemovesGatewayBaseURL(t *testing.T) {
 	provider := plan.Proposed["provider"].(map[string]any)
 	openai := provider["openai"].(map[string]any)
 	options := openai["options"].(map[string]any)
-	if options["baseURL"] != "http://127.0.0.1:4141/openai" {
+	if options["baseURL"] != "http://127.0.0.1:4141/a/opencode/openai" {
 		t.Fatalf("baseURL = %v", options["baseURL"])
 	}
 
-	if err := os.WriteFile(path, []byte(`{"provider":{"openai":{"options":{"apiKey":"key","baseURL":"http://127.0.0.1:4141/openai"}}}}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"provider":{"openai":{"options":{"apiKey":"key","baseURL":"http://127.0.0.1:4141/a/opencode/openai"}}}}`), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	plan, err = manager.Plan(ProviderInput{ID: "openai", Gateway: GatewayDisable, GatewayBaseURL: "http://127.0.0.1:4141"})
@@ -131,6 +131,29 @@ func TestPlanGatewayToggleSetsAndRemovesGatewayBaseURL(t *testing.T) {
 	options = openai["options"].(map[string]any)
 	if _, ok := options["baseURL"]; ok {
 		t.Fatalf("gateway baseURL should be removed: %#v", options)
+	}
+}
+
+func TestGatewayURLMatchesExistingGatewayForms(t *testing.T) {
+	tests := []string{
+		"http://127.0.0.1:4141/a/opencode/openai",
+		"http://127.0.0.1:4141/openai",
+		"http://localhost:4141/a/opencode/openrouter",
+	}
+	for _, baseURL := range tests {
+		id := "openai"
+		if strings.Contains(baseURL, "openrouter") {
+			id = "openrouter"
+		}
+		if !GatewayURLMatches(baseURL, "http://127.0.0.1:4141", id) {
+			t.Fatalf("GatewayURLMatches(%q) = false, want true", baseURL)
+		}
+	}
+	if GatewayURLMatches("https://api.openai.com/v1", "http://127.0.0.1:4141", "openai") {
+		t.Fatal("upstream URL should not match gateway")
+	}
+	if GatewayURLMatches("http://127.0.0.1:4141/a/opencode/deepseek", "http://127.0.0.1:4141", "openai") {
+		t.Fatal("different provider gateway URL should not match")
 	}
 }
 

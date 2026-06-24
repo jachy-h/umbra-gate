@@ -70,6 +70,8 @@ func newWithOptions(database *db.DB, options Options) *Handler {
 		"sessions":       template.Must(template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/layout.html", "templates/sessions.html")),
 		"session_detail": template.Must(template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/layout.html", "templates/session_detail.html")),
 		"models":         template.Must(template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/layout.html", "templates/models.html")),
+		"agents":         template.Must(template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/layout.html", "templates/agents.html")),
+		"analytics":      template.Must(template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/layout.html", "templates/analytics.html")),
 		"providers":      template.Must(template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/layout.html", "templates/providers.html")),
 		"failures":       template.Must(template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/layout.html", "templates/failures.html")),
 	}
@@ -118,6 +120,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if path == "models" {
 		h.models(w, r)
+		return
+	}
+
+	if path == "agents" {
+		h.agents(w, r)
+		return
+	}
+
+	if path == "analytics" {
+		h.analytics(w, r)
 		return
 	}
 
@@ -192,6 +204,14 @@ func (h *Handler) sessionDetail(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) models(w http.ResponseWriter, r *http.Request) {
 	h.render(w, "models", pageData{Active: "models"})
+}
+
+func (h *Handler) agents(w http.ResponseWriter, r *http.Request) {
+	h.render(w, "agents", pageData{Active: "agents"})
+}
+
+func (h *Handler) analytics(w http.ResponseWriter, r *http.Request) {
+	h.render(w, "analytics", pageData{Active: "analytics"})
 }
 
 func (h *Handler) providers(w http.ResponseWriter, r *http.Request) {
@@ -428,7 +448,6 @@ func (h *Handler) syncGatewayConfig(manager opencodeconfig.Manager, id string, e
 		return
 	}
 	if err := h.gatewayCfg.UpsertProvider(id, config.ProviderConfig{
-		Type:    "",
 		BaseURL: origBaseURL,
 	}); err != nil {
 		slog.Warn("failed to register gateway provider", "error", err)
@@ -620,8 +639,12 @@ func providerStatuses(cfg map[string]any, providerList []providerListEntry, gate
 }
 
 func gatewayURLMatches(baseURL, gatewayBaseURL, cfgID string) bool {
-	prefix := strings.TrimRight(gatewayBaseURL, "/") + "/"
-	return baseURL == prefix+cfgID || baseURL == prefix+url.PathEscape(cfgID)
+	current := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	prefix := strings.TrimRight(strings.TrimSpace(gatewayBaseURL), "/") + "/"
+	escapedID := url.PathEscape(cfgID)
+	return current == prefix+"a/opencode/"+escapedID ||
+		current == prefix+cfgID ||
+		current == prefix+escapedID
 }
 
 func (h *Handler) withGatewayBaseURL(input opencodeconfig.ProviderInput) opencodeconfig.ProviderInput {

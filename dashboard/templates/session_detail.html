@@ -29,8 +29,12 @@ fetch('/api/sessions/' + id)
     .then(r => r.json())
     .then(s => {
         document.getElementById('detailGrid').innerHTML = `
+            <div class="key">Agent</div><div class="val">${esc(s.agent_id || 'unknown')}</div>
             <div class="key">Provider</div><div class="val">${esc(s.provider_name)}</div>
             <div class="key">Model</div><div class="val">${esc(s.model)}</div>
+            <div class="key">Project</div><div class="val">${esc(s.project_id || 'unknown')}</div>
+            <div class="key">Endpoint</div><div class="val">${esc(s.endpoint || 'unknown')}</div>
+            <div class="key">Stream</div><div class="val">${s.stream ? 'yes' : 'no'}</div>
             <div class="key">Status</div><div class="val"><span class="badge badge-${esc(s.status)}">${esc(s.status)}</span></div>
             <div class="key">Started</div><div class="val">${new Date(s.started_at + 'Z').toLocaleString()}</div>
             <div class="key">Ended</div><div class="val">${s.ended_at ? new Date(s.ended_at + 'Z').toLocaleString() : '-'}</div>

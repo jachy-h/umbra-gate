@@ -18,11 +18,9 @@ func TestPrintBannerShowsUnifiedProviderList(t *testing.T) {
 listen: "127.0.0.1:4141"
 providers:
   anthropic:
-    type: anthropic
     base_url: https://api.anthropic.com
     api_key: literal-key
   openai:
-    type: openai
     base_url: https://api.openai.com
     api_key: ${OPENAI_API_KEY}
   zen:
@@ -63,11 +61,9 @@ providers:
   zen:
     base_url: https://opencode.ai/api
   anthropic:
-    type: anthropic
     base_url: https://api.anthropic.com
     api_key: literal-key
   openai:
-    type: openai
     base_url: https://api.openai.com
     api_key: literal-key
   github-copilot:

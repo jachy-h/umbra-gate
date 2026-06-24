@@ -78,7 +78,7 @@ func TestDashboardStaticModulesAreServed(t *testing.T) {
 	}
 }
 
-func TestProvidersModuleLoadsCodexIndependently(t *testing.T) {
+func TestProvidersModuleManagesGatewayProvidersOnly(t *testing.T) {
 	database, err := db.Open(filepath.Join(t.TempDir(), "router.db"))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
@@ -94,11 +94,15 @@ func TestProvidersModuleLoadsCodexIndependently(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
 	}
 	body := w.Body.String()
-	if !strings.Contains(body, "this.loadData();\n        this.loadCodexData();") {
-		t.Fatalf("providers module should load Codex independently: %s", body)
+	for _, want := range []string{"loadProviderAnalytics", "loadProviders", "/api/gateway/providers"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("providers module missing %q: %s", want, body)
+		}
 	}
-	if strings.Contains(body, "await this.loadCodexData();") {
-		t.Fatalf("providers module should not depend on OpenCode load success: %s", body)
+	for _, notWant := range []string{"loadCodexData", "/api/agents"} {
+		if strings.Contains(body, notWant) {
+			t.Fatalf("providers module should not contain agent management code %q: %s", notWant, body)
+		}
 	}
 }
 
@@ -141,14 +145,65 @@ func TestProvidersPageRendersManagementUI(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
 	}
 	body := w.Body.String()
-	for _, want := range []string{"class=\"page-title\">Providers", "Provider Analytics", "Management", "Codex CLI", "providerAnalyticsRange", "providerTokenChart", "providerSuccessChart", "providerAnalyticsContainer", "gateway forwarding", "providerTableContainer", "provider-management-table", "codexTableContainer", "codex-management-table", "/dashboard/static/dashboard/providers.js", "@picocss/pico"} {
+	for _, want := range []string{"class=\"page-title\">Providers", "Provider Analytics", "Gateway Providers", "New Provider", "Base URL", "providerAnalyticsRange", "providerTokenChart", "providerSuccessChart", "providerAnalyticsContainer", "/dashboard/static/dashboard/providers.js", "@picocss/pico"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("providers page missing %q: %s", want, body)
 		}
 	}
-	for _, notWant := range []string{"id=\"models\"", "Default Model", "Small Model", "Gateway</a>", "Step 1", "Step 2", "Step 3", "providerSelect", "editApiKey", "editBaseUrl", "previewBtn", "applyBtn", "saveBtn", "addBtn", "diffPreview", "Edit Gateway", "Edit Provider", "Add Provider"} {
+	for _, notWant := range []string{"id=\"models\"", "<th>Type</th>", "Default Model", "Small Model", "Gateway</a>", "Step 1", "Step 2", "Step 3", "providerSelect", "editApiKey", "editBaseUrl", "previewBtn", "applyBtn", "saveBtn", "addBtn", "diffPreview", "Edit Gateway", "Codex CLI", "gateway forwarding", "providerTableContainer", "provider-management-table", "codexTableContainer", "codex-management-table"} {
 		if strings.Contains(body, notWant) {
 			t.Fatalf("providers page should not contain %q: %s", notWant, body)
+		}
+	}
+}
+
+func TestAgentsPageRendersManagementUI(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "router.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer database.Close()
+	handler := New(database, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/dashboard/agents", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	for _, want := range []string{"class=\"page-title\">Agents", "agentsApp", "Gateway URL", "agent-tabs", "/dashboard/static/dashboard/agents.js"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("agents page missing %q: %s", want, body)
+		}
+	}
+}
+
+func TestAnalyticsPageRendersDimensionUI(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "router.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer database.Close()
+	handler := New(database, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/dashboard/analytics", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	for _, want := range []string{"analytics-outline", "href=\"#overview\"", "href=\"#agent\"", "href=\"#provider\"", "href=\"#model\"", "href=\"#project\"", "href=\"#endpoint\"", "href=\"#status\"", "Last 7 days", "/dashboard/static/dashboard/analytics.js"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("analytics page missing %q: %s", want, body)
+		}
+	}
+	for _, notWant := range []string{"class=\"page-title\">Analytics", "analyticsDimension", "Dimension</label>", "@change=\"loadBreakdown\""} {
+		if strings.Contains(body, notWant) {
+			t.Fatalf("analytics page should not contain selector UI %q: %s", notWant, body)
 		}
 	}
 }
@@ -309,7 +364,7 @@ func TestProviderDiffCanEnableGatewayBaseURL(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), "http://127.0.0.1:4141/openai") {
+	if !strings.Contains(w.Body.String(), "http://127.0.0.1:4141/a/opencode/openai") {
 		t.Fatalf("diff missing gateway baseURL: %s", w.Body.String())
 	}
 }
@@ -383,7 +438,7 @@ func TestProviderGatewayTogglesAtomically(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile() error = %v", err)
 	}
-	if !strings.Contains(string(written), "\"baseURL\": \"http://127.0.0.1:4141/openai\"") {
+	if !strings.Contains(string(written), "\"baseURL\": \"http://127.0.0.1:4141/a/opencode/openai\"") {
 		t.Fatalf("baseURL not set after enable: %s", string(written))
 	}
 	if _, ok := gatewayCfg.Provider("openai"); !ok {
@@ -502,7 +557,7 @@ js_repl = false
 	if err != nil {
 		t.Fatalf("ReadFile() error = %v", err)
 	}
-	for _, want := range []string{`model_provider = "openai"`, `[model_providers.openai]`, `base_url = "http://127.0.0.1:4141/openai/v1"`, `[features]`} {
+	for _, want := range []string{`model_provider = "openai"`, `[model_providers.openai]`, `base_url = "http://127.0.0.1:4141/a/codex/openai/v1"`, `[features]`} {
 		if !strings.Contains(string(written), want) {
 			t.Fatalf("codex config missing %q:\n%s", want, string(written))
 		}
@@ -511,7 +566,7 @@ js_repl = false
 	if !ok {
 		t.Fatal("gateway config.yaml missing provider after enable")
 	}
-	if p.Type != "" || p.BaseURL != "https://api.openai.com" {
+	if p.BaseURL != "https://api.openai.com" {
 		t.Fatalf("gateway provider = %+v, want passthrough https://api.openai.com", p)
 	}
 

@@ -13,7 +13,6 @@ import (
 // config.yaml (e.g. ${VOLC_KEY}) for round-trip awareness.
 type gatewayProviderView struct {
 	ID           string `json:"id"`
-	Type         string `json:"type"`
 	BaseURL      string `json:"base_url"`
 	APIKey       string `json:"api_key"`
 	APIKeySource string `json:"api_key_source"`
@@ -24,7 +23,6 @@ type gatewayProviderView struct {
 // an empty api_key signals "leave unchanged".
 type gatewayProviderInput struct {
 	ID      string `json:"id,omitempty"`
-	Type    string `json:"type"`
 	BaseURL string `json:"base_url"`
 	APIKey  string `json:"api_key"`
 }
@@ -129,7 +127,6 @@ func (h *Handler) deleteGatewayProvider(w http.ResponseWriter, _ *http.Request, 
 
 func upsertFromInput(cfg *config.Config, id string, in gatewayProviderInput) error {
 	return cfg.UpsertProvider(id, config.ProviderConfig{
-		Type:      config.ProviderType(strings.TrimSpace(in.Type)),
 		BaseURL:   strings.TrimSpace(in.BaseURL),
 		APIKey:    in.APIKey,
 		APIKeyRaw: in.APIKey,
@@ -150,7 +147,6 @@ func writeUpsertError(w http.ResponseWriter, err error) {
 func toView(id string, p config.ProviderConfig) gatewayProviderView {
 	return gatewayProviderView{
 		ID:           id,
-		Type:         string(p.Type),
 		BaseURL:      p.BaseURL,
 		APIKey:       "",
 		APIKeySource: p.APIKeyRaw,

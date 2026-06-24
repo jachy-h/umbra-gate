@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -91,6 +92,20 @@ func Discover(baseDir string) []ConfigFile {
 		files = append(files, ConfigFile{Path: filepath.Join(baseDir, "opencode.json"), Label: "opencode.json", Exists: false, Selected: true})
 	}
 	return files
+}
+
+func DiscoverFile(path string) []ConfigFile {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return Discover("")
+	}
+	_, err := os.Stat(path)
+	return []ConfigFile{{
+		Path:     path,
+		Label:    filepath.Base(path),
+		Exists:   err == nil,
+		Selected: true,
+	}}
 }
 
 func (m Manager) Load() (map[string]any, []byte, error) {
@@ -224,14 +239,84 @@ func applyInput(cfg map[string]any, input ProviderInput) {
 	}
 	gatewayBase := strings.TrimRight(input.GatewayBaseURL, "/")
 	if input.Gateway == GatewayEnable && gatewayBase != "" {
-		options["baseURL"] = gatewayBase + "/" + url.PathEscape(id)
+		options["baseURL"] = gatewayURL(gatewayBase, id)
 	}
 	if input.Gateway == GatewayDisable && gatewayBase != "" {
-		esc := url.PathEscape(id)
-		if current, ok := options["baseURL"].(string); ok && (current == gatewayBase+"/"+id || current == gatewayBase+"/"+esc) {
+		if current, ok := options["baseURL"].(string); ok && gatewayURLMatches(current, gatewayBase, id) {
 			delete(options, "baseURL")
 		}
 	}
+}
+
+func gatewayURL(baseURL, id string) string {
+	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if base == "" {
+		base = "http://127.0.0.1:4141"
+	}
+	return base + "/a/opencode/" + url.PathEscape(id)
+}
+
+func GatewayURL(baseURL, id string) string {
+	return gatewayURL(baseURL, id)
+}
+
+func gatewayURLMatches(baseURL, gatewayBaseURL, id string) bool {
+	base := strings.TrimRight(strings.TrimSpace(gatewayBaseURL), "/")
+	current := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	escapedID := url.PathEscape(id)
+	if current == base+"/a/opencode/"+escapedID ||
+		current == base+"/"+id ||
+		current == base+"/"+escapedID {
+		return true
+	}
+	currentURL, currentErr := url.Parse(current)
+	baseURLParsed, baseErr := url.Parse(base)
+	if currentErr != nil || baseErr != nil || currentURL.Scheme != baseURLParsed.Scheme || !sameLocalGatewayHost(currentURL.Host, baseURLParsed.Host) {
+		return false
+	}
+	path := strings.Trim(strings.TrimSpace(currentURL.EscapedPath()), "/")
+	if path == "" {
+		return false
+	}
+	if strings.HasPrefix(path, "a/opencode/") {
+		return pathMatchesProvider(strings.TrimPrefix(path, "a/opencode/"), id)
+	}
+	return !strings.Contains(path, "/") && pathMatchesProvider(path, id)
+}
+
+func GatewayURLMatches(baseURL, gatewayBaseURL, id string) bool {
+	return gatewayURLMatches(baseURL, gatewayBaseURL, id)
+}
+
+func sameLocalGatewayHost(a, b string) bool {
+	a = strings.TrimSpace(a)
+	b = strings.TrimSpace(b)
+	if a == b {
+		return true
+	}
+	aHost, aPort, aErr := net.SplitHostPort(a)
+	bHost, bPort, bErr := net.SplitHostPort(b)
+	if aErr != nil || bErr != nil || aPort != bPort {
+		return false
+	}
+	return isLoopbackName(aHost) && isLoopbackName(bHost)
+}
+
+func isLoopbackName(host string) bool {
+	switch strings.ToLower(strings.Trim(host, "[]")) {
+	case "127.0.0.1", "localhost", "::1":
+		return true
+	default:
+		return false
+	}
+}
+
+func pathMatchesProvider(path, id string) bool {
+	if path == url.PathEscape(id) || path == id {
+		return true
+	}
+	unescaped, err := url.PathUnescape(path)
+	return err == nil && unescaped == id
 }
 
 func stripJSONC(raw []byte) []byte {

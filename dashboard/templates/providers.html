@@ -3,8 +3,8 @@
     <h1 class="page-title">Providers</h1>
 
     <div class="provider-layout">
-        <div class="card">
-            <div class="provider-analytics-header">
+        <section class="card">
+            <div class="provider-header">
                 <h2>Provider Analytics</h2>
                 <select id="providerAnalyticsRange" v-model="range" @change="loadProviderAnalytics" aria-label="Provider analytics time range">
                     <option value="24h">24h</option>
@@ -19,44 +19,66 @@
             </div>
             <provider-analytics-rows id="providerAnalyticsContainer" :rows="analyticsRows"></provider-analytics-rows>
             <div class="vue-fallback" id="providerAnalyticsFallback"><div class="empty-state">Loading...</div></div>
-        </div>
+        </section>
 
-        <div class="card">
-            <div class="provider-analytics-header">
-                <h2>Management</h2>
-                <span class="empty-state" style="padding:0;font-size:13px;">Toggle gateway forwarding per client</span>
+        <section class="card">
+            <div class="provider-header">
+                <h2>Gateway Providers</h2>
+                <button type="button" @click="newProvider">New Provider</button>
             </div>
-            <provider-management-table id="providerTableContainer" :rows="providerRows" :config-path="configPath" @toggle="onToggle"></provider-management-table>
-            <div class="vue-fallback"><div class="empty-state">Loading...</div></div>
-            <div class="codex-section">
-                <h3>Codex CLI</h3>
-                <codex-management-table id="codexTableContainer" :rows="codexRows" :config-path="codexConfigPath" @toggle="onCodexToggle"></codex-management-table>
-            </div>
-            <div id="globalStatus" class="empty-state" :style="{ minHeight: '20px', marginTop: '8px', color: statusError ? '#c53030' : '#0d7d44' }">{{`{{ status }}`}}</div>
-        </div>
+            <div v-if="providerRows === null" class="empty-state">Loading providers...</div>
+            <table v-else>
+                <thead><tr><th>ID</th><th>Base URL</th><th>Key</th><th></th></tr></thead>
+                <tbody>
+                    <tr v-if="!providerRows.length"><td colspan="4">No gateway providers configured.</td></tr>
+                    <tr v-for="provider in providerRows" :key="provider.id">
+                        <td><strong v-text="provider.id"></strong></td>
+                        <td><code v-text="provider.base_url"></code></td>
+                        <td><span :class="['badge', provider.has_api_key ? 'badge-success' : 'badge-pending']" v-text="provider.has_api_key ? 'configured' : 'passthrough'"></span></td>
+                        <td class="provider-actions">
+                            <button type="button" class="secondary" @click="editProvider(provider)">Edit</button>
+                            <button type="button" class="secondary danger" @click="deleteProvider(provider)">Delete</button>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+            <form class="provider-form" @submit.prevent="saveProvider">
+                <h3 v-text="editingExisting ? 'Edit Provider' : 'New Provider'"></h3>
+                <div class="provider-form-grid">
+                    <label>ID<input v-model.trim="form.id" :disabled="editingExisting" required></label>
+                    <label>Base URL<input v-model.trim="form.base_url" placeholder="https://api.example.com" required></label>
+                    <label>API Key / Env Ref<input v-model="form.api_key" placeholder="${PROVIDER_API_KEY}"></label>
+                </div>
+                <div class="provider-form-actions">
+                    <button type="submit" :aria-busy="saving">Save</button>
+                    <button type="button" class="secondary" @click="resetForm">Cancel</button>
+                    <span :class="['provider-status', statusError ? 'error' : '']" v-if="status" v-text="status"></span>
+                </div>
+            </form>
+        </section>
     </div>
 </div>
 
 <style>
-.gw-cell { display:flex; align-items:center; gap:10px; }
-.gw-cell label { margin:0; padding:0; display:inline-flex; align-items:center; }
-.gw-cell input[type="checkbox"][role="switch"] { margin:0; --pico-line-height:1; }
-.gw-status { font-size:13px; color:#6b7280; min-width:70px; }
-.gw-status.on { color:#0d7d44; font-weight:600; }
-.config-path { font-family: ui-monospace, Menlo, monospace; font-size:11px; color:#6b7280; padding:6px 10px; background:#f9fafb; border-radius:4px; display:inline-block; margin-bottom:12px; }
-.row-source { font-size:11px; color:#6b7280; text-transform:uppercase; letter-spacing:0.5px; margin-left:8px; }
-.provider-subline { font-size:12px; color:#6b7280; margin-top:3px; }
-.gw-cell input[type="checkbox"][role="switch"]:checked { --pico-color: #4f46e5; --pico-background-color: #4f46e5; --pico-border-color: #4f46e5; }
-.codex-section { margin-top:22px; padding-top:18px; border-top:1px solid #eef2f7; }
-.codex-section h3 { font-size:16px; margin:0 0 12px; color:#111827; }
-.provider-analytics-header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px; }
-.provider-analytics-header h2 { margin:0; }
-.provider-analytics-header select { width:auto; min-width:120px; margin:0; }
-.provider-layout { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+.provider-layout { display:grid; grid-template-columns:1fr; gap:16px; }
+.provider-header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px; }
+.provider-header h2 { margin:0; }
+.provider-header select, .provider-header button { width:auto; margin:0; }
 .provider-charts { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:18px; }
 .provider-chart { height:260px; min-height:260px; position:relative; }
 .provider-chart canvas { width:100% !important; height:100% !important; }
-@media (max-width: 900px) { .provider-layout { grid-template-columns:1fr; } .provider-charts { grid-template-columns:1fr; } }
+.provider-actions { display:flex; gap:8px; justify-content:flex-end; }
+.provider-actions button, .provider-form-actions button { width:auto; margin:0; padding:7px 10px; font-size:13px; }
+.provider-actions .danger { color:#c53030; border-color:#fecaca; }
+.provider-form { margin-top:18px; padding-top:16px; border-top:1px solid #eef2f7; }
+.provider-form h3 { font-size:16px; margin:0 0 12px; color:#111827; }
+.provider-form-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; }
+.provider-form label { font-size:13px; color:#4b5563; margin:0; }
+.provider-form input, .provider-form select { margin-top:6px; }
+.provider-form-actions { display:flex; align-items:center; gap:10px; margin-top:12px; }
+.provider-status { color:#0d7d44; font-size:13px; }
+.provider-status.error { color:#c53030; }
+@media (max-width: 760px) { .provider-charts, .provider-form-grid { grid-template-columns:1fr; } .provider-actions { justify-content:flex-start; } }
 .provider-analytics-grid { display:grid; gap:10px; }
 .provider-analytics-row { display:grid; grid-template-columns:minmax(140px,1fr) repeat(5, minmax(82px, auto)); gap:12px; align-items:center; padding:12px 14px; border:1px solid #f3f4f6; border-radius:10px; background:#fafafa; }
 .provider-analytics-name { font-weight:700; color:#111827; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

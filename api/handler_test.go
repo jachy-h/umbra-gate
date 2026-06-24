@@ -6,8 +6,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/jachy-h/umbra-gate/agents"
+	agentclaude "github.com/jachy-h/umbra-gate/agents/claude"
 	"github.com/jachy-h/umbra-gate/config"
 	"github.com/jachy-h/umbra-gate/db"
 )
@@ -100,6 +103,191 @@ func TestOverviewEndpointReturnsSummaryStats(t *testing.T) {
 	}
 	if overview.TotalSessions != 1 || overview.TotalRequests != 1 || overview.TotalTokens != 150 || overview.SuccessRate != 1 {
 		t.Fatalf("overview = %+v, want one successful request", overview)
+	}
+}
+
+func TestSessionsEndpointSupportsPagination(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "router.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer database.Close()
+
+	providerID, err := database.EnsureProvider("openai")
+	if err != nil {
+		t.Fatalf("EnsureProvider() error = %v", err)
+	}
+	for i := 0; i < 4; i++ {
+		if _, err := database.CreateSession(providerID, "gpt-4o"); err != nil {
+			t.Fatalf("CreateSession() error = %v", err)
+		}
+	}
+
+	handler := New(database, newHandlerTestConfig(t))
+	req := httptest.NewRequest(http.MethodGet, "/sessions?limit=2&offset=1", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	var sessions []db.Session
+	if err := json.NewDecoder(w.Body).Decode(&sessions); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if len(sessions) != 2 {
+		t.Fatalf("len(sessions) = %d, want 2", len(sessions))
+	}
+}
+
+func TestAnalyticsBreakdownEndpointReturnsDimensionStats(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "router.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer database.Close()
+
+	providerID, err := database.EnsureProvider("openai")
+	if err != nil {
+		t.Fatalf("EnsureProvider() error = %v", err)
+	}
+	sessionID, err := database.CreateSessionWithMeta(providerID, "gpt-4o", db.SessionMeta{AgentID: "codex", ProjectID: "gateway-redesign"})
+	if err != nil {
+		t.Fatalf("CreateSessionWithMeta() error = %v", err)
+	}
+	if err := database.CompleteSession(sessionID, 100, 50, 1000, nil); err != nil {
+		t.Fatalf("CompleteSession() error = %v", err)
+	}
+
+	handler := New(database, newHandlerTestConfig(t))
+	req := httptest.NewRequest(http.MethodGet, "/analytics/breakdown?range=7d&dimension=project", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	var breakdown []db.AnalyticsBreakdown
+	if err := json.NewDecoder(w.Body).Decode(&breakdown); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if len(breakdown) != 1 || breakdown[0].Name != "gateway-redesign" || breakdown[0].RequestCount != 1 || breakdown[0].TotalTokens != 150 {
+		t.Fatalf("breakdown = %+v, want project stats", breakdown)
+	}
+}
+
+func TestAnalyticsTimeSeriesEndpointSupportsDimension(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "router.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer database.Close()
+
+	providerID, err := database.EnsureProvider("openai")
+	if err != nil {
+		t.Fatalf("EnsureProvider() error = %v", err)
+	}
+	sessionID, err := database.CreateSessionWithMeta(providerID, "gpt-4o", db.SessionMeta{AgentID: "codex"})
+	if err != nil {
+		t.Fatalf("CreateSessionWithMeta() error = %v", err)
+	}
+	if err := database.CompleteSession(sessionID, 100, 50, 1000, nil); err != nil {
+		t.Fatalf("CompleteSession() error = %v", err)
+	}
+
+	handler := New(database, newHandlerTestConfig(t))
+	req := httptest.NewRequest(http.MethodGet, "/analytics/timeseries?range=7d&by=agent", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	var stats []db.TimeSeriesBreakdown
+	if err := json.NewDecoder(w.Body).Decode(&stats); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if len(stats) != 1 || stats[0].Name != "codex" || stats[0].TotalTokens != 150 {
+		t.Fatalf("stats = %+v, want codex time series", stats)
+	}
+}
+
+func TestAgentsEndpointReturnsAgentStatuses(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "router.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer database.Close()
+
+	claudePath := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(claudePath, []byte(`{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:4141/a/claude-code/anthropic"}}`), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	cfg := newHandlerTestConfig(t)
+	if err := cfg.UpsertProvider("anthropic", config.ProviderConfig{BaseURL: "https://api.anthropic.com"}); err != nil {
+		t.Fatalf("UpsertProvider() error = %v", err)
+	}
+	registry := agents.NewRegistry(agentclaude.Manager{Path: claudePath})
+	handler := NewWithAgents(database, cfg, registry)
+
+	req := httptest.NewRequest(http.MethodGet, "/agents", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var statuses []agents.Status
+	if err := json.NewDecoder(w.Body).Decode(&statuses); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if len(statuses) != 1 || statuses[0].AgentID != "claude-code" || len(statuses[0].Bindings) != 1 || !statuses[0].Bindings[0].GatewayEnabled {
+		t.Fatalf("statuses = %+v, want enabled claude-code", statuses)
+	}
+}
+
+func TestAgentPlanAndApplyEndpoints(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "router.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer database.Close()
+
+	claudePath := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(claudePath, []byte(`{"env":{}}`), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	cfg := newHandlerTestConfig(t)
+	if err := cfg.UpsertProvider("anthropic", config.ProviderConfig{BaseURL: "https://api.anthropic.com"}); err != nil {
+		t.Fatalf("UpsertProvider() error = %v", err)
+	}
+	registry := agents.NewRegistry(agentclaude.Manager{Path: claudePath})
+	handler := NewWithAgents(database, cfg, registry)
+
+	planReq := httptest.NewRequest(http.MethodPost, "/agents/claude-code/plan", strings.NewReader(`{"enabled":true}`))
+	planW := httptest.NewRecorder()
+	handler.ServeHTTP(planW, planReq)
+	if planW.Code != http.StatusOK {
+		t.Fatalf("plan status = %d, body = %s", planW.Code, planW.Body.String())
+	}
+	var plan agents.Plan
+	if err := json.NewDecoder(planW.Body).Decode(&plan); err != nil {
+		t.Fatalf("Decode(plan) error = %v", err)
+	}
+
+	applyReq := httptest.NewRequest(http.MethodPost, "/agents/claude-code/apply", strings.NewReader(`{"enabled":true,"base_checksum":"`+plan.BaseChecksum+`"}`))
+	applyW := httptest.NewRecorder()
+	handler.ServeHTTP(applyW, applyReq)
+	if applyW.Code != http.StatusOK {
+		t.Fatalf("apply status = %d, body = %s", applyW.Code, applyW.Body.String())
+	}
+	written, err := os.ReadFile(claudePath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if !strings.Contains(string(written), "http://127.0.0.1:4141/a/claude-code/anthropic") {
+		t.Fatalf("settings not written: %s", string(written))
 	}
 }
 

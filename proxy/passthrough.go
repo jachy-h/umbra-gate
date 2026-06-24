@@ -27,7 +27,30 @@ type passthroughStreamChunk struct {
 	Usage *passthroughUsage `json:"usage"`
 }
 
-func (p *Proxy) handlePassthrough(w http.ResponseWriter, r *http.Request, providerName string, providerCfg *config.ProviderConfig, upstream *url.URL) {
+func extractModel(body []byte) string {
+	var req struct {
+		Model string `json:"model"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		slog.Warn("failed to parse request body for model extraction", "error", err)
+	}
+	if req.Model == "" {
+		return "unknown"
+	}
+	return req.Model
+}
+
+func isStreamRequest(body []byte) bool {
+	var req struct {
+		Stream bool `json:"stream"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		slog.Warn("failed to parse request body for stream detection", "error", err)
+	}
+	return req.Stream
+}
+
+func (p *Proxy) handlePassthrough(w http.ResponseWriter, r *http.Request, route routeContext, providerCfg *config.ProviderConfig, upstream *url.URL) {
 	startTime := time.Now()
 
 	bodyBytes, err := io.ReadAll(io.LimitReader(r.Body, 10<<20))
@@ -39,26 +62,32 @@ func (p *Proxy) handlePassthrough(w http.ResponseWriter, r *http.Request, provid
 	}
 
 	model := extractModel(bodyBytes)
-	slog.Info("request", "provider", providerName, "model", model, "path", upstream.Path)
+	stream := isStreamRequest(bodyBytes)
+	slog.Info("request", "agent", route.AgentID, "provider", route.ProviderName, "model", model, "path", upstream.Path)
 
-	providerID, err := p.db.EnsureProvider(providerName)
+	providerID, err := p.db.EnsureProvider(route.ProviderName)
 	if err != nil {
 		slog.Error("failed to ensure provider", "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
-	sessionID, err := p.db.CreateSession(providerID, model)
+	sessionID, err := p.db.CreateSessionWithMeta(providerID, model, db.SessionMeta{
+		AgentID:   route.AgentID,
+		ProjectID: route.ProjectID,
+		Endpoint:  route.Endpoint,
+		Stream:    stream,
+	})
 	if err != nil {
 		slog.Error("failed to create session", "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
-	if isStreamRequest(bodyBytes) {
-		p.proxyPassthroughStream(w, r, providerName, providerCfg, upstream, bodyBytes, sessionID, startTime)
+	if stream {
+		p.proxyPassthroughStream(w, r, route, providerCfg, upstream, bodyBytes, sessionID, startTime)
 	} else {
-		p.proxyPassthroughNonStream(w, r, providerName, providerCfg, upstream, bodyBytes, sessionID, startTime)
+		p.proxyPassthroughNonStream(w, r, route, providerCfg, upstream, bodyBytes, sessionID, startTime)
 	}
 }
 
@@ -69,16 +98,10 @@ func (p *Proxy) buildPassthroughRequest(r *http.Request, providerCfg *config.Pro
 	}
 
 	copyAllForwardableHeaders(req.Header, r.Header)
-	if providerCfg.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+providerCfg.APIKey)
-	}
-	if req.Header.Get("Content-Type") == "" {
-		req.Header.Set("Content-Type", "application/json")
-	}
 	return req, nil
 }
 
-func (p *Proxy) proxyPassthroughNonStream(w http.ResponseWriter, r *http.Request, providerName string, providerCfg *config.ProviderConfig, upstream *url.URL, bodyBytes []byte, sessionID int64, startTime time.Time) {
+func (p *Proxy) proxyPassthroughNonStream(w http.ResponseWriter, r *http.Request, route routeContext, providerCfg *config.ProviderConfig, upstream *url.URL, bodyBytes []byte, sessionID int64, startTime time.Time) {
 	req, err := p.buildPassthroughRequest(r, providerCfg, upstream, bodyBytes)
 	if err != nil {
 		errMsg := err.Error()
@@ -95,7 +118,7 @@ func (p *Proxy) proxyPassthroughNonStream(w http.ResponseWriter, r *http.Request
 		p.db.CompleteSession(sessionID, 0, 0, durationMs, &errMsg)
 		captureRequestLog(p.db, db.RequestLog{
 			SessionID:       sessionID,
-			ProviderName:    providerName,
+			ProviderName:    route.ProviderName,
 			Method:          req.Method,
 			URL:             req.URL.String(),
 			RequestHeaders:  serializeHeaders(req.Header),
@@ -127,7 +150,7 @@ func (p *Proxy) proxyPassthroughNonStream(w http.ResponseWriter, r *http.Request
 		p.db.CompleteSession(sessionID, 0, 0, durationMs, &errMsg)
 		captureRequestLog(p.db, db.RequestLog{
 			SessionID:       sessionID,
-			ProviderName:    providerName,
+			ProviderName:    route.ProviderName,
 			Method:          req.Method,
 			URL:             req.URL.String(),
 			RequestHeaders:  serializeHeaders(req.Header),
@@ -152,7 +175,7 @@ func (p *Proxy) proxyPassthroughNonStream(w http.ResponseWriter, r *http.Request
 
 	slog.Info("upstream response",
 		"session_id", sessionID,
-		"provider", providerName,
+		"provider", route.ProviderName,
 		"status", resp.StatusCode,
 		"body_size", len(respBody),
 		"prompt_tokens", promptTokens,
@@ -161,10 +184,10 @@ func (p *Proxy) proxyPassthroughNonStream(w http.ResponseWriter, r *http.Request
 	)
 
 	p.db.CompleteSession(sessionID, promptTokens, completionTokens, durationMs, nil)
-	p.db.CreateRequest(sessionID, promptTokens, completionTokens, durationMs, nil)
+	p.db.CreateRequestWithMeta(sessionID, promptTokens, completionTokens, durationMs, int64(resp.StatusCode), route.Endpoint, nil)
 	captureRequestLog(p.db, db.RequestLog{
 		SessionID:       sessionID,
-		ProviderName:    providerName,
+		ProviderName:    route.ProviderName,
 		Method:          req.Method,
 		URL:             req.URL.String(),
 		RequestHeaders:  serializeHeaders(req.Header),
@@ -180,7 +203,7 @@ func (p *Proxy) proxyPassthroughNonStream(w http.ResponseWriter, r *http.Request
 	w.Write(respBody)
 }
 
-func (p *Proxy) proxyPassthroughStream(w http.ResponseWriter, r *http.Request, providerName string, providerCfg *config.ProviderConfig, upstream *url.URL, bodyBytes []byte, sessionID int64, startTime time.Time) {
+func (p *Proxy) proxyPassthroughStream(w http.ResponseWriter, r *http.Request, route routeContext, providerCfg *config.ProviderConfig, upstream *url.URL, bodyBytes []byte, sessionID int64, startTime time.Time) {
 	req, err := p.buildPassthroughRequest(r, providerCfg, upstream, bodyBytes)
 	if err != nil {
 		errMsg := err.Error()
@@ -197,7 +220,7 @@ func (p *Proxy) proxyPassthroughStream(w http.ResponseWriter, r *http.Request, p
 		p.db.CompleteSession(sessionID, 0, 0, durationMs, &errMsg)
 		captureRequestLog(p.db, db.RequestLog{
 			SessionID:       sessionID,
-			ProviderName:    providerName,
+			ProviderName:    route.ProviderName,
 			Method:          req.Method,
 			URL:             req.URL.String(),
 			RequestHeaders:  serializeHeaders(req.Header),
@@ -223,7 +246,7 @@ func (p *Proxy) proxyPassthroughStream(w http.ResponseWriter, r *http.Request, p
 		p.db.CompleteSession(sessionID, 0, 0, durationMs, &errMsg)
 		captureRequestLog(p.db, db.RequestLog{
 			SessionID:       sessionID,
-			ProviderName:    providerName,
+			ProviderName:    route.ProviderName,
 			Method:          req.Method,
 			URL:             req.URL.String(),
 			RequestHeaders:  serializeHeaders(req.Header),
@@ -309,7 +332,7 @@ func (p *Proxy) proxyPassthroughStream(w http.ResponseWriter, r *http.Request, p
 
 	slog.Info("upstream response",
 		"session_id", sessionID,
-		"provider", providerName,
+		"provider", route.ProviderName,
 		"stream", true,
 		"prompt_tokens", promptTokens,
 		"completion_tokens", completionTokens,
@@ -317,10 +340,10 @@ func (p *Proxy) proxyPassthroughStream(w http.ResponseWriter, r *http.Request, p
 	)
 
 	p.db.CompleteSession(sessionID, promptTokens, completionTokens, durationMs, nil)
-	p.db.CreateRequest(sessionID, promptTokens, completionTokens, durationMs, nil)
+	p.db.CreateRequestWithMeta(sessionID, promptTokens, completionTokens, durationMs, int64(resp.StatusCode), route.Endpoint, nil)
 	captureRequestLog(p.db, db.RequestLog{
 		SessionID:       sessionID,
-		ProviderName:    providerName,
+		ProviderName:    route.ProviderName,
 		Method:          req.Method,
 		URL:             req.URL.String(),
 		RequestHeaders:  serializeHeaders(req.Header),

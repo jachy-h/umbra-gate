@@ -3,10 +3,44 @@
     <h1 style="margin-bottom:24px;font-size:24px;">Sessions</h1>
 
     <card-section>
-        <session-table :sessions="sessions"></session-table>
-        <div class="vue-fallback"><table><tbody><tr><td colspan="7">Loading...</td></tr></tbody></table></div>
+        <div class="sessions-card">
+            <div class="sessions-toolbar">
+                <div class="sessions-page-summary" v-text="pageSummary"></div>
+                <div class="sessions-controls">
+                    <label for="sessionsPageSize">Page size</label>
+                    <select id="sessionsPageSize" :value="pageSize" @change="changePageSize" :disabled="loading">
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                    </select>
+                    <button type="button" class="secondary" @click="previousPage" :disabled="page <= 1 || loading">Previous</button>
+                    <button type="button" class="secondary" @click="nextPage" :disabled="!hasNext || loading">Next</button>
+                </div>
+            </div>
+            <div class="sessions-table-scroll">
+                <session-table :sessions="sessions"></session-table>
+                <div class="vue-fallback"><table><tbody><tr><td colspan="9">Loading...</td></tr></tbody></table></div>
+            </div>
+        </div>
     </card-section>
 </div>
+
+<style>
+#sessionsApp { height: calc(100vh - 120px); display:flex; flex-direction:column; min-height:0; }
+#sessionsApp .card { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
+.sessions-card { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; }
+.sessions-toolbar { flex:0 0 auto; display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px; flex-wrap:wrap; }
+.sessions-table-scroll { flex:1 1 auto; min-height:0; overflow:auto; border:1px solid #eee; border-radius:8px; }
+.sessions-table-scroll table { min-width:960px; }
+.sessions-table-scroll thead th { position:sticky; top:0; z-index:1; background:#fff; }
+.sessions-page-summary { color:#6b7280; font-size:13px; }
+.sessions-controls { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.sessions-controls label { color:#6b7280; font-size:12px; font-weight:600; margin:0; }
+.sessions-controls select, .sessions-controls button { width:auto; margin:0; height:36px; }
+.sessions-controls select { min-width:76px; border:1px solid #e5e7eb; background:#fff; border-radius:8px; padding:6px 10px; font-size:13px; }
+.sessions-controls button { padding:6px 10px; font-size:13px; }
+@media (max-width: 720px) { #sessionsApp { height: calc(100vh - 96px); } }
+</style>
 
 <script type="module" src="/dashboard/static/dashboard/sessions.js"></script>
 {{end}}

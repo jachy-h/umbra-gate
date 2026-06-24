@@ -38,7 +38,6 @@ func TestGatewayProvidersList(t *testing.T) {
 	h, _, _ := newGatewayTestSetup(t, `
 providers:
   openai:
-    type: openai
     base_url: https://api.openai.com
     api_key: ${FOO_KEY}
 `)
@@ -56,8 +55,11 @@ providers:
 		t.Fatalf("len = %d", len(out))
 	}
 	got := out[0]
-	if got["id"] != "openai" || got["type"] != "openai" || got["base_url"] != "https://api.openai.com" {
+	if got["id"] != "openai" || got["base_url"] != "https://api.openai.com" {
 		t.Errorf("entry = %+v", got)
+	}
+	if _, ok := got["type"]; ok {
+		t.Errorf("type should not be returned: %+v", got)
 	}
 	if got["api_key"] != "" {
 		t.Errorf("api_key should not be returned, got %q", got["api_key"])
@@ -78,7 +80,6 @@ func TestGatewayProvidersCreate(t *testing.T) {
 	h, cfg, configPath := newGatewayTestSetup(t, "providers: {}\n")
 	body := `{
 		"id": "openai",
-		"type": "openai",
 		"base_url": "https://api.openai.com",
 		"api_key": "sk-real"
 	}`
@@ -105,11 +106,10 @@ func TestGatewayProvidersCreateRejectsDuplicate(t *testing.T) {
 	h, _, _ := newGatewayTestSetup(t, `
 providers:
   openai:
-    type: openai
     base_url: https://api.openai.com
     api_key: k
 `)
-	body := `{"id":"openai","type":"openai","base_url":"https://api.openai.com","api_key":"k"}`
+	body := `{"id":"openai","base_url":"https://api.openai.com","api_key":"k"}`
 	req := httptest.NewRequest(http.MethodPost, "/gateway/providers", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -121,10 +121,9 @@ providers:
 func TestGatewayProvidersCreateValidates(t *testing.T) {
 	h, _, _ := newGatewayTestSetup(t, "providers: {}\n")
 	cases := map[string]string{
-		"missing id":     `{"type":"openai","base_url":"https://x","api_key":"k"}`,
-		"bad type":       `{"id":"p","type":"bogus","base_url":"https://x","api_key":"k"}`,
-		"missing base":   `{"id":"p","type":"openai","api_key":"k"}`,
-		"unset env ref":  `{"id":"p","type":"openai","base_url":"https://x","api_key":"${UNSET_VAR_AAA}"}`,
+		"missing id":     `{"base_url":"https://x","api_key":"k"}`,
+		"missing base":   `{"id":"p","api_key":"k"}`,
+		"unset env ref":  `{"id":"p","base_url":"https://x","api_key":"${UNSET_VAR_AAA}"}`,
 		"malformed json": `{`,
 	}
 	for name, body := range cases {
@@ -169,12 +168,10 @@ func TestGatewayProvidersUpdatePreservesKeyWhenBlank(t *testing.T) {
 	h, cfg, _ := newGatewayTestSetup(t, `
 providers:
   openai:
-    type: openai
     base_url: https://api.openai.com
     api_key: existing
 `)
 	body := `{
-		"type": "openai",
 		"base_url": "https://api.openai.com/v1",
 		"api_key": ""
 	}`
@@ -197,11 +194,10 @@ func TestGatewayProvidersUpdateChangesKey(t *testing.T) {
 	h, cfg, _ := newGatewayTestSetup(t, `
 providers:
   openai:
-    type: openai
     base_url: https://api.openai.com
     api_key: old
 `)
-	body := `{"type":"openai","base_url":"https://api.openai.com","api_key":"new"}`
+	body := `{"base_url":"https://api.openai.com","api_key":"new"}`
 	req := httptest.NewRequest(http.MethodPut, "/gateway/providers/openai", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -216,7 +212,7 @@ providers:
 
 func TestGatewayProvidersUpdateNotFound(t *testing.T) {
 	h, _, _ := newGatewayTestSetup(t, "providers: {}\n")
-	body := `{"type":"openai","base_url":"https://x","api_key":"k"}`
+	body := `{"base_url":"https://x","api_key":"k"}`
 	req := httptest.NewRequest(http.MethodPut, "/gateway/providers/missing", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -229,7 +225,6 @@ func TestGatewayProvidersDelete(t *testing.T) {
 	h, cfg, configPath := newGatewayTestSetup(t, `
 providers:
   openai:
-    type: openai
     base_url: https://api.openai.com
     api_key: k
 `)

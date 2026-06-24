@@ -1,16 +1,18 @@
 import { createApp } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.prod.js';
-import { CodexManagementTable, ProviderAnalyticsRows, ProviderManagementTable } from './components.js';
+import { ProviderAnalyticsRows } from './components.js';
+
+const emptyForm = () => ({ id: '', base_url: '', api_key: '' });
 
 createApp({
-    components: { CodexManagementTable, ProviderAnalyticsRows, ProviderManagementTable },
+    components: { ProviderAnalyticsRows },
     data() {
         return {
             range: '7d',
-            configPath: '',
-            codexConfigPath: '',
-            providerRows: [],
-            codexRows: [],
+            providerRows: null,
             analyticsRows: [],
+            form: emptyForm(),
+            editingExisting: false,
+            saving: false,
             status: '',
             statusError: false,
             tokenChart: null,
@@ -20,31 +22,81 @@ createApp({
     mounted() {
         document.documentElement.classList.add('vue-ready');
         this.loadProviderAnalytics();
-        this.loadData();
-        this.loadCodexData();
+        this.loadProviders();
     },
     methods: {
-        buildRows(openRows, gwRows) {
-            const combined = [];
-            openRows.forEach(provider => {
-                combined.push({ id: provider.id, name: provider.name, source: 'opencode', built_in: provider.built_in, configured: provider.configured, gateway_enabled: provider.gateway_enabled, hasGw: false, gwType: '', gwBaseUrl: '' });
-            });
-            gwRows.forEach(provider => {
-                const existing = combined.find(row => row.id.toLowerCase() === provider.id.toLowerCase());
-                if (existing) {
-                    existing.hasGw = true;
-                    existing.gwType = provider.type;
-                    existing.gwBaseUrl = provider.base_url;
-                } else {
-                    combined.push({ id: provider.id, name: provider.id, source: 'gateway', type: provider.type, built_in: false, configured: false, gateway_enabled: false, hasGw: true, gwType: provider.type, gwBaseUrl: provider.base_url });
-                }
-            });
-            return combined;
-        },
         setStatus(text, isError = false) {
             this.status = text || '';
             this.statusError = isError;
             if (text && !isError) setTimeout(() => { if (this.status === text) this.status = ''; }, 3000);
+        },
+        async loadProviders() {
+            try {
+                const response = await fetch('/api/gateway/providers');
+                if (!response.ok) throw new Error('failed to load providers');
+                this.providerRows = await response.json();
+            } catch (error) {
+                this.providerRows = [];
+                this.setStatus(error.message || 'Failed to load providers.', true);
+            }
+        },
+        newProvider() {
+            this.resetForm();
+        },
+        editProvider(provider) {
+            this.editingExisting = true;
+            this.form = {
+                id: provider.id,
+                base_url: provider.base_url || '',
+                api_key: ''
+            };
+        },
+        resetForm(clearStatus = true) {
+            this.editingExisting = false;
+            this.form = emptyForm();
+            if (clearStatus) this.setStatus('');
+        },
+        async saveProvider() {
+            this.saving = true;
+            try {
+                const payload = {
+                    id: this.form.id,
+                    base_url: this.form.base_url,
+                    api_key: this.form.api_key
+                };
+                const url = this.editingExisting ? `/api/gateway/providers/${encodeURIComponent(this.form.id)}` : '/api/gateway/providers';
+                const method = this.editingExisting ? 'PUT' : 'POST';
+                const response = await fetch(url, {
+                    method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({}));
+                    throw new Error(data.error || 'failed to save provider');
+                }
+                this.setStatus(`Provider ${this.form.id} saved.`);
+                this.resetForm(false);
+                await this.loadProviders();
+            } catch (error) {
+                this.setStatus(error.message || 'Failed to save provider.', true);
+            } finally {
+                this.saving = false;
+            }
+        },
+        async deleteProvider(provider) {
+            try {
+                const response = await fetch(`/api/gateway/providers/${encodeURIComponent(provider.id)}`, { method: 'DELETE' });
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({}));
+                    throw new Error(data.error || 'failed to delete provider');
+                }
+                this.setStatus(`Provider ${provider.id} deleted.`);
+                if (this.form.id === provider.id) this.resetForm();
+                await this.loadProviders();
+            } catch (error) {
+                this.setStatus(error.message || 'Failed to delete provider.', true);
+            }
         },
         async loadProviderAnalytics() {
             try {
@@ -54,83 +106,6 @@ createApp({
                 this.$nextTick(() => this.renderCharts());
             } catch {
                 this.analyticsRows = [];
-            }
-        },
-        async loadData() {
-            try {
-                const [cfgData, gwData] = await Promise.all([
-                    fetch('/dashboard/providers/config').then(response => response.json()),
-                    fetch('/api/gateway/providers').then(response => response.json())
-                ]);
-                const files = cfgData.files || [];
-                const selected = files.find(file => file.selected) || files[0];
-                this.configPath = selected ? selected.path : '';
-                this.providerRows = this.buildRows(cfgData.providers || [], Array.isArray(gwData) ? gwData : []);
-            } catch {
-                this.providerRows = [];
-                this.setStatus('Failed to load providers.', true);
-            }
-        },
-        async loadCodexData() {
-            try {
-                const data = await fetch('/dashboard/codex/config').then(response => response.json());
-                const files = data.files || [];
-                const selected = files.find(file => file.selected) || files[0];
-                this.codexConfigPath = selected ? selected.path : '';
-                this.codexRows = data.providers || [];
-            } catch {
-                this.codexRows = [];
-            }
-        },
-        async onToggle(provider, enabled) {
-            const previous = provider.gateway_enabled;
-            provider.updating = true;
-            provider.statusText = enabled ? 'Enabling...' : 'Disabling...';
-            provider.gateway_enabled = enabled;
-            try {
-                const response = await fetch('/dashboard/providers/gateway', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id: provider.id, enabled, path: this.configPath })
-                });
-                if (!response.ok) {
-                    const data = await response.json();
-                    throw new Error(data.error || 'failed');
-                }
-                provider.statusText = enabled ? 'On' : 'Off';
-                this.setStatus(`Gateway ${enabled ? 'enabled' : 'disabled'} for ${provider.id}.`);
-            } catch (error) {
-                provider.gateway_enabled = previous;
-                provider.statusText = previous ? 'On' : 'Off';
-                this.setStatus(error.message || 'Failed to update.', true);
-            } finally {
-                provider.updating = false;
-            }
-        },
-        async onCodexToggle(provider, enabled) {
-            const previous = provider.gateway_enabled;
-            provider.updating = true;
-            provider.statusText = enabled ? 'Enabling...' : 'Disabling...';
-            provider.gateway_enabled = enabled;
-            try {
-                const response = await fetch('/dashboard/codex/gateway', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id: provider.id, enabled, path: this.codexConfigPath })
-                });
-                if (!response.ok) {
-                    const data = await response.json();
-                    throw new Error(data.error || 'failed');
-                }
-                provider.statusText = enabled ? 'On' : 'Off';
-                this.setStatus(`Codex gateway ${enabled ? 'enabled' : 'disabled'} for ${provider.id}.`);
-                await this.loadData();
-            } catch (error) {
-                provider.gateway_enabled = previous;
-                provider.statusText = previous ? 'On' : 'Off';
-                this.setStatus(error.message || 'Failed to update Codex.', true);
-            } finally {
-                provider.updating = false;
             }
         },
         renderCharts() {
