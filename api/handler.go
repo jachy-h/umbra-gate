@@ -98,9 +98,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func defaultAgentRegistry() *agents.Registry {
 	return agents.NewRegistry(
+		agentopencode.Manager{},
 		agentcodex.Manager{},
 		agentclaude.Manager{},
-		agentopencode.Manager{},
 	)
 }
 
@@ -165,6 +165,10 @@ func (h *Handler) handleAgents(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
 			return
 		}
+		if input.Enabled && !agentGatewayCapable(manager, h.agentContext()) {
+			http.Error(w, `{"error":"gateway proxy is temporarily disabled for this agent"}`, http.StatusConflict)
+			return
+		}
 		plan, err := manager.Plan(h.agentContext(), input)
 		if err != nil {
 			http.Error(w, `{"error":"failed to plan agent config"}`, http.StatusInternalServerError)
@@ -181,6 +185,10 @@ func (h *Handler) handleAgents(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
 			return
 		}
+		if input.Enabled && !agentGatewayCapable(manager, h.agentContext()) {
+			http.Error(w, `{"error":"gateway proxy is temporarily disabled for this agent"}`, http.StatusConflict)
+			return
+		}
 		if err := manager.Apply(h.agentContext(), input.BindingInput, input.BaseChecksum); err != nil {
 			if isStaleAgentConfig(err) {
 				http.Error(w, `{"error":"stale agent config"}`, http.StatusConflict)
@@ -193,6 +201,11 @@ func (h *Handler) handleAgents(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func agentGatewayCapable(manager agents.Manager, ctx agents.Context) bool {
+	status, err := manager.Status(ctx)
+	return err == nil && status.GatewayCapable
 }
 
 func isStaleAgentConfig(err error) bool {

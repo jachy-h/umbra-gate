@@ -130,19 +130,22 @@ The gateway uses `config.yaml` as its provider routing map. Client credentials c
 
 ## Codex CLI Configuration
 
-The Providers dashboard can also toggle Codex CLI traffic through Umbragate. It discovers `CODEX_HOME/config.toml` when `CODEX_HOME` is set, otherwise `~/.codex/config.toml`, and writes a Codex model provider such as:
+The Providers dashboard can also toggle Codex CLI traffic through Umbragate. It discovers `CODEX_HOME/config.toml` when `CODEX_HOME` is set, otherwise `~/.codex/config.toml`, and routes traffic through a managed `custom` provider (Codex rejects overriding reserved built-in ids like `openai`):
 
 ```toml
-model_provider = "openai"
+# after enable
+model = "gpt-5.5"
 
-[model_providers.openai]
-name = "Umbragate OpenAI"
+model_provider = "custom"
+
+[model_providers.custom]
+name = "Umbragate"
 base_url = "http://127.0.0.1:4141/a/codex/openai/v1"
-env_key = "OPENAI_API_KEY"
 wire_api = "responses"
+requires_openai_auth = true
 ```
 
-For Codex, the gateway keeps the upstream provider in passthrough mode so the client-provided `Authorization` header from `env_key` reaches the upstream API unchanged. The default OpenAI upstream is `https://api.openai.com`, so Codex requests to `/a/codex/openai/v1/...` are proxied to `https://api.openai.com/v1/...` and recorded in the local dashboard with `agent_id=codex`.
+For Codex, the gateway keeps authentication passthrough: Codex uses its own `auth.json` login state to send `Authorization`, and Umbragate forwards that header unchanged. The default OpenAI upstream is `https://api.openai.com`, so Codex requests to `/a/codex/openai/v1/responses` are proxied to `https://api.openai.com/v1/responses` and recorded in the local dashboard with `agent_id=codex`.
 
 ## Data
 

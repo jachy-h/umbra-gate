@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"html/template"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -20,13 +20,8 @@ import (
 	"github.com/jachy-h/umbra-gate/opencodeconfig"
 )
 
-//go:embed templates/* static/* static/dashboard/*
-var templateFS embed.FS
-
-type pageData struct {
-	Active string
-	Stats  *db.Stats
-}
+//go:embed dist/*
+var dashboardFS embed.FS
 
 type Options struct {
 	OpencodeConfigPath  string
@@ -38,12 +33,13 @@ type Options struct {
 
 type Handler struct {
 	db                  *db.DB
-	templates           map[string]*template.Template
 	opencode            opencodeconfig.Manager
 	codex               codexconfig.Manager
 	providerListCommand func() ([]byte, error)
 	gatewayBaseURL      string
 	gatewayCfg          *config.Config
+	staticFS            http.FileSystem
+	indexHTML           []byte
 }
 
 func New(database *db.DB, gatewayCfg *config.Config) *Handler {
@@ -51,30 +47,6 @@ func New(database *db.DB, gatewayCfg *config.Config) *Handler {
 }
 
 func newWithOptions(database *db.DB, options Options) *Handler {
-	funcMap := template.FuncMap{
-		"formatNum": func(n int64) string {
-			if n >= 1000000 {
-				v := float64(n) / 1000000
-				return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.1f", v), "0"), ".") + "M"
-			}
-			if n >= 1000 {
-				v := float64(n) / 1000
-				return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.1f", v), "0"), ".") + "K"
-			}
-			return fmt.Sprintf("%d", n)
-		},
-	}
-
-	templates := map[string]*template.Template{
-		"home":           template.Must(template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/layout.html", "templates/home.html")),
-		"sessions":       template.Must(template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/layout.html", "templates/sessions.html")),
-		"session_detail": template.Must(template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/layout.html", "templates/session_detail.html")),
-		"models":         template.Must(template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/layout.html", "templates/models.html")),
-		"agents":         template.Must(template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/layout.html", "templates/agents.html")),
-		"analytics":      template.Must(template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/layout.html", "templates/analytics.html")),
-		"providers":      template.Must(template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/layout.html", "templates/providers.html")),
-		"failures":       template.Must(template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/layout.html", "templates/failures.html")),
-	}
 	providerListCommand := options.ProviderListCommand
 	if providerListCommand == nil {
 		providerListCommand = defaultProviderListCommand
@@ -83,14 +55,23 @@ func newWithOptions(database *db.DB, options Options) *Handler {
 	if gatewayBaseURL == "" {
 		gatewayBaseURL = "http://127.0.0.1:4141"
 	}
+	distFS, err := fs.Sub(dashboardFS, "dist")
+	if err != nil {
+		panic(fmt.Sprintf("dashboard dist missing: %v", err))
+	}
+	indexHTML, err := fs.ReadFile(dashboardFS, "dist/index.html")
+	if err != nil {
+		panic(fmt.Sprintf("dashboard index missing: %v", err))
+	}
 	return &Handler{
 		db:                  database,
-		templates:           templates,
 		opencode:            opencodeconfig.Manager{Path: options.OpencodeConfigPath},
 		codex:               codexconfig.Manager{Path: options.CodexConfigPath},
 		providerListCommand: providerListCommand,
 		gatewayBaseURL:      gatewayBaseURL,
 		gatewayCfg:          options.GatewayConfig,
+		staticFS:            http.FS(distFS),
+		indexHTML:           indexHTML,
 	}
 }
 
@@ -98,48 +79,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/dashboard")
 	path = strings.TrimPrefix(path, "/")
 
-	if strings.HasPrefix(path, "static/") {
-		http.StripPrefix("/dashboard/", http.FileServer(http.FS(templateFS))).ServeHTTP(w, r)
-		return
-	}
-
-	if path == "" || path == "/" {
-		h.home(w, r)
-		return
-	}
-
-	if path == "sessions" {
-		h.sessions(w, r)
-		return
-	}
-
-	if strings.HasPrefix(path, "sessions/") {
-		h.sessionDetail(w, r)
-		return
-	}
-
-	if path == "models" {
-		h.models(w, r)
-		return
-	}
-
-	if path == "agents" {
-		h.agents(w, r)
-		return
-	}
-
-	if path == "analytics" {
-		h.analytics(w, r)
-		return
-	}
-
-	if path == "providers" {
-		h.providers(w, r)
-		return
-	}
-
-	if path == "failures" {
-		h.failures(w, r)
+	if strings.HasPrefix(path, "assets/") {
+		http.StripPrefix("/dashboard/", http.FileServer(h.staticFS)).ServeHTTP(w, r)
 		return
 	}
 
@@ -183,53 +124,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.NotFound(w, r)
+	h.serveSPA(w)
 }
 
-func (h *Handler) home(w http.ResponseWriter, r *http.Request) {
-	stats, err := h.db.GetStats()
-	if err != nil {
-		slog.Error("failed to get stats", "error", err)
-	}
-	h.render(w, "home", pageData{Active: "home", Stats: stats})
-}
-
-func (h *Handler) sessions(w http.ResponseWriter, r *http.Request) {
-	h.render(w, "sessions", pageData{Active: "sessions"})
-}
-
-func (h *Handler) sessionDetail(w http.ResponseWriter, r *http.Request) {
-	h.render(w, "session_detail", pageData{Active: "sessions"})
-}
-
-func (h *Handler) models(w http.ResponseWriter, r *http.Request) {
-	h.render(w, "models", pageData{Active: "models"})
-}
-
-func (h *Handler) agents(w http.ResponseWriter, r *http.Request) {
-	h.render(w, "agents", pageData{Active: "agents"})
-}
-
-func (h *Handler) analytics(w http.ResponseWriter, r *http.Request) {
-	h.render(w, "analytics", pageData{Active: "analytics"})
-}
-
-func (h *Handler) providers(w http.ResponseWriter, r *http.Request) {
-	h.render(w, "providers", pageData{Active: "providers"})
-}
-
-func (h *Handler) failures(w http.ResponseWriter, r *http.Request) {
-	h.render(w, "failures", pageData{Active: "failures"})
-}
-
-func (h *Handler) render(w http.ResponseWriter, name string, data pageData) {
-	tmpl, ok := h.templates[name]
-	if !ok {
-		http.Error(w, "template not found", http.StatusInternalServerError)
-		return
-	}
-	if err := tmpl.ExecuteTemplate(w, "layout.html", data); err != nil {
-		slog.Error("failed to render template", "error", err)
+func (h *Handler) serveSPA(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	if _, err := w.Write(h.indexHTML); err != nil {
+		slog.Error("failed to serve dashboard", "error", err)
 	}
 }
 
@@ -335,6 +237,10 @@ func (h *Handler) codexDiff(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
 		return
 	}
+	if input.Gateway == codexconfig.GatewayEnable {
+		http.Error(w, `{"error":"codex gateway proxy is temporarily disabled"}`, http.StatusConflict)
+		return
+	}
 	manager := h.codexManagerForPath(input.Path)
 	input.ProviderInput = h.withCodexGatewayBaseURL(input.ProviderInput)
 	plan, err := manager.Plan(input.ProviderInput)
@@ -353,6 +259,10 @@ func (h *Handler) codexApply(w http.ResponseWriter, r *http.Request) {
 	var input codexApplyRequest
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+		return
+	}
+	if input.Gateway == codexconfig.GatewayEnable {
+		http.Error(w, `{"error":"codex gateway proxy is temporarily disabled"}`, http.StatusConflict)
 		return
 	}
 	manager := h.codexManagerForPath(input.Path)
@@ -517,8 +427,13 @@ func (h *Handler) codexGateway(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"id is required"}`, http.StatusBadRequest)
 		return
 	}
+	if id != codexconfig.DefaultProviderID {
+		http.Error(w, `{"error":"codex gateway currently supports openai only"}`, http.StatusBadRequest)
+		return
+	}
 	if input.Enabled {
-		h.ensureCodexGatewayProvider(id)
+		http.Error(w, `{"error":"codex gateway proxy is temporarily disabled"}`, http.StatusConflict)
+		return
 	}
 	manager := h.codexManagerForPath(input.Path)
 	plan, err := manager.Plan(codexconfig.ProviderInput{ID: id})
@@ -676,14 +591,7 @@ func (h *Handler) codexManagerForPath(path string) codexconfig.Manager {
 }
 
 func (h *Handler) codexProviderIDs() []string {
-	if h.gatewayCfg == nil {
-		return []string{codexconfig.DefaultProviderID}
-	}
-	ids := h.gatewayCfg.ProviderIDs()
-	if len(ids) == 0 {
-		return []string{codexconfig.DefaultProviderID}
-	}
-	return ids
+	return []string{codexconfig.DefaultProviderID}
 }
 
 func (h *Handler) opencodeProviders() ([]providerListEntry, error) {

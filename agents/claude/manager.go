@@ -60,11 +60,13 @@ func (m Manager) Status(ctx agents.Context) (*agents.Status, error) {
 	}
 	liveBaseURL := envString(cfg, baseURLEnvKey)
 	return &agents.Status{
-		AgentID:        m.ID(),
-		DisplayName:    m.DisplayName(),
-		ConfigFiles:    files,
-		GatewayCapable: true,
-		FineGrained:    false,
+		AgentID:               m.ID(),
+		DisplayName:           m.DisplayName(),
+		ConfigFiles:           files,
+		GatewayCapable:        false,
+		GatewayDisabledReason: "Proxy support is temporarily disabled while a reliable integration is evaluated.",
+		FineGrained:           false,
+		ProxyMethod:           "Environment Variable",
 		Bindings: []agents.BindingStatus{{
 			ProviderID:     providerID,
 			Configured:     liveBaseURL != "",

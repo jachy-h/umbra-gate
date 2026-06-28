@@ -14,7 +14,7 @@ import (
 	"github.com/jachy-h/umbra-gate/db"
 )
 
-func TestHomeRendersIconStatsAndUsageBreakdowns(t *testing.T) {
+func TestDashboardServesViteSPAShell(t *testing.T) {
 	database, err := db.Open(filepath.Join(t.TempDir(), "router.db"))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
@@ -28,38 +28,24 @@ func TestHomeRendersIconStatsAndUsageBreakdowns(t *testing.T) {
 	handler.ServeHTTP(w, req)
 
 	body := w.Body.String()
-	if strings.Contains(body, `<h1 style="margin-bottom:24px;font-size:24px;">Sessions</h1>`) || strings.Contains(body, `<h1 style="margin-bottom:24px;font-size:24px;">Models</h1>`) {
-		t.Fatalf("home rendered the wrong page content: %s", body)
-	}
 	for _, want := range []string{
 		"<title>Umbragate</title>",
-		`href="/dashboard/static/dashboard/styles.css"`,
-		`<span class="brand-mark">U</span><span>Umbragate</span>`,
-		`class="page-title"`,
-		`class="dashboard-metrics"`,
-		"tokensByProvider",
-		"tokensByModel",
-		"noUsageYet",
-		"stat-desc",
-		"analyticsRange",
-		"cdn.jsdelivr.net/npm/chart.js",
-		`id="usageTrendChart"`,
-		`id="languageToggle"`,
-		`data-i18n="dashboard"`,
-		"type=\"module\" src=\"/dashboard/static/dashboard/home.js\"",
+		`<div id="app"></div>`,
+		`type="module" crossorigin src="/dashboard/assets/`,
+		`rel="stylesheet" crossorigin href="/dashboard/assets/`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("home body does not contain %q", want)
 		}
 	}
-	for _, notWant := range []string{"Personal AI Router", ">AI Router</span>"} {
+	for _, notWant := range []string{"/dashboard/static/dashboard/", "vue.esm-browser.prod.js", "Personal AI Router"} {
 		if strings.Contains(body, notWant) {
-			t.Fatalf("home body should not contain old brand %q: %s", notWant, body)
+			t.Fatalf("SPA shell should not contain old dashboard artifact %q: %s", notWant, body)
 		}
 	}
 }
 
-func TestDashboardStaticModulesAreServed(t *testing.T) {
+func TestDashboardDeepLinksFallBackToSPAShell(t *testing.T) {
 	database, err := db.Open(filepath.Join(t.TempDir(), "router.db"))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
@@ -67,98 +53,21 @@ func TestDashboardStaticModulesAreServed(t *testing.T) {
 	defer database.Close()
 
 	handler := New(database, nil)
-	req := httptest.NewRequest(http.MethodGet, "/dashboard/static/dashboard/home.js", nil)
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
+	for _, route := range []string{"/dashboard/providers", "/dashboard/agents", "/dashboard/sessions/12"} {
+		req := httptest.NewRequest(http.MethodGet, route, nil)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
-	}
-	if !strings.Contains(w.Body.String(), "vue.esm-browser.prod.js") {
-		t.Fatalf("static module missing Vue CDN import: %s", w.Body.String())
-	}
-}
-
-func TestProvidersModuleManagesGatewayProvidersOnly(t *testing.T) {
-	database, err := db.Open(filepath.Join(t.TempDir(), "router.db"))
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer database.Close()
-
-	handler := New(database, nil)
-	req := httptest.NewRequest(http.MethodGet, "/dashboard/static/dashboard/providers.js", nil)
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
-	}
-	body := w.Body.String()
-	for _, want := range []string{"loadProviderAnalytics", "loadProviders", "/api/gateway/providers"} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("providers module missing %q: %s", want, body)
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, body = %s", route, w.Code, w.Body.String())
 		}
-	}
-	for _, notWant := range []string{"loadCodexData", "/api/agents"} {
-		if strings.Contains(body, notWant) {
-			t.Fatalf("providers module should not contain agent management code %q: %s", notWant, body)
+		if !strings.Contains(w.Body.String(), `<div id="app"></div>`) {
+			t.Fatalf("%s did not return SPA shell: %s", route, w.Body.String())
 		}
 	}
 }
 
-func TestFailuresPageRendersAnalyticsUI(t *testing.T) {
-	database, err := db.Open(filepath.Join(t.TempDir(), "router.db"))
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer database.Close()
-
-	handler := New(database, nil)
-	req := httptest.NewRequest(http.MethodGet, "/dashboard/failures", nil)
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
-	}
-	body := w.Body.String()
-	for _, want := range []string{"class=\"page-title\">Failures", "failureAnalyticsRange", "failureSummary", "failureCategories", "failureProviders", "failureModels", "recentFailures", "/dashboard/static/dashboard/failures.js"} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("failures page missing %q: %s", want, body)
-		}
-	}
-}
-
-func TestProvidersPageRendersManagementUI(t *testing.T) {
-	database, err := db.Open(filepath.Join(t.TempDir(), "router.db"))
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer database.Close()
-	handler := newWithOptions(database, Options{OpencodeConfigPath: filepath.Join(t.TempDir(), "opencode.json")})
-
-	req := httptest.NewRequest(http.MethodGet, "/dashboard/providers", nil)
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
-	}
-	body := w.Body.String()
-	for _, want := range []string{"class=\"page-title\">Providers", "Provider Analytics", "Gateway Providers", "New Provider", "Base URL", "providerAnalyticsRange", "providerTokenChart", "providerSuccessChart", "providerAnalyticsContainer", "/dashboard/static/dashboard/providers.js", "/dashboard/static/dashboard/styles.css"} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("providers page missing %q: %s", want, body)
-		}
-	}
-	for _, notWant := range []string{"@picocss/pico", "id=\"models\"", "<th>Type</th>", "Default Model", "Small Model", "Gateway</a>", "Step 1", "Step 2", "Step 3", "providerSelect", "editApiKey", "editBaseUrl", "previewBtn", "applyBtn", "saveBtn", "addBtn", "diffPreview", "Edit Gateway", "Codex CLI", "gateway forwarding", "providerTableContainer", "provider-management-table", "codexTableContainer", "codex-management-table"} {
-		if strings.Contains(body, notWant) {
-			t.Fatalf("providers page should not contain %q: %s", notWant, body)
-		}
-	}
-}
-
-func TestAgentsPageRendersManagementUI(t *testing.T) {
+func TestDashboardViteAssetsAreServed(t *testing.T) {
 	database, err := db.Open(filepath.Join(t.TempDir(), "router.db"))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
@@ -166,7 +75,12 @@ func TestAgentsPageRendersManagementUI(t *testing.T) {
 	defer database.Close()
 	handler := New(database, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/dashboard/agents", nil)
+	indexReq := httptest.NewRequest(http.MethodGet, "/dashboard", nil)
+	indexW := httptest.NewRecorder()
+	handler.ServeHTTP(indexW, indexReq)
+	assetPath := extractDashboardAssetPath(t, indexW.Body.String(), ".js")
+
+	req := httptest.NewRequest(http.MethodGet, assetPath, nil)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -174,39 +88,37 @@ func TestAgentsPageRendersManagementUI(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
 	}
 	body := w.Body.String()
-	for _, want := range []string{"class=\"page-title\">Agents", "agentsApp", "Gateway URL", "agent-tabs", "/dashboard/static/dashboard/agents.js"} {
+	for _, want := range []string{"/api/providers/analytics", "/api/analytics/breakdown", "/api/agents", "createApp"} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("agents page missing %q: %s", want, body)
+			t.Fatalf("Vite asset missing %q", want)
 		}
+	}
+	if strings.Contains(body, "/api/gateway/providers") {
+		t.Fatalf("statistics-only dashboard bundle should not request provider management API")
 	}
 }
 
-func TestAnalyticsPageRendersDimensionUI(t *testing.T) {
-	database, err := db.Open(filepath.Join(t.TempDir(), "router.db"))
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	defer database.Close()
-	handler := New(database, nil)
-
-	req := httptest.NewRequest(http.MethodGet, "/dashboard/analytics", nil)
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
-	}
-	body := w.Body.String()
-	for _, want := range []string{"analytics-outline", "href=\"#overview\"", "href=\"#agent\"", "href=\"#provider\"", "href=\"#model\"", "href=\"#project\"", "href=\"#endpoint\"", "href=\"#status\"", "Last 7 days", "/dashboard/static/dashboard/analytics.js"} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("analytics page missing %q: %s", want, body)
+func extractDashboardAssetPath(t *testing.T, body, suffix string) string {
+	t.Helper()
+	start := strings.Index(body, "/dashboard/assets/")
+	for start >= 0 {
+		rest := body[start:]
+		end := strings.IndexAny(rest, `"'`)
+		if end < 0 {
+			t.Fatalf("asset path not terminated in %s", body)
 		}
-	}
-	for _, notWant := range []string{"class=\"page-title\">Analytics", "analyticsDimension", "Dimension</label>", "@change=\"loadBreakdown\""} {
-		if strings.Contains(body, notWant) {
-			t.Fatalf("analytics page should not contain selector UI %q: %s", notWant, body)
+		candidate := rest[:end]
+		if strings.HasSuffix(candidate, suffix) {
+			return candidate
 		}
+		next := strings.Index(rest[len(candidate):], "/dashboard/assets/")
+		if next < 0 {
+			break
+		}
+		start += len(candidate) + next
 	}
+	t.Fatalf("no %s dashboard asset found in %s", suffix, body)
+	return ""
 }
 
 func TestProviderConfigUsesOpencodeProviderListOnly(t *testing.T) {
@@ -488,13 +400,13 @@ func TestCodexConfigEndpointReturnsGatewayStatus(t *testing.T) {
 	defer database.Close()
 	dir := t.TempDir()
 	codexPath := filepath.Join(dir, "config.toml")
-	if err := os.WriteFile(codexPath, []byte(`model_provider = "openai"
+	if err := os.WriteFile(codexPath, []byte(`model_provider = "custom"
 
-[model_providers.openai]
-name = "Umbragate OpenAI"
-base_url = "http://127.0.0.1:4141/openai/v1"
-env_key = "OPENAI_API_KEY"
+[model_providers.custom]
+name = "Umbragate"
+base_url = "http://127.0.0.1:4141/a/codex/openai/v1"
 wire_api = "responses"
+requires_openai_auth = true
 `), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
@@ -516,14 +428,14 @@ wire_api = "responses"
 		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
 	}
 	body := w.Body.String()
-	for _, want := range []string{`"providers"`, `"openai"`, `"active":true`, `"gateway_enabled":true`, `"env_key":"OPENAI_API_KEY"`} {
+	for _, want := range []string{`"providers"`, `"openai"`, `"gateway_enabled":true`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("body missing %q: %s", want, body)
 		}
 	}
 }
 
-func TestCodexGatewayTogglesConfigAndGatewayProvider(t *testing.T) {
+func TestCodexGatewayRejectsEnableWhileProxyIsDisabled(t *testing.T) {
 	database, err := db.Open(filepath.Join(t.TempDir(), "router.db"))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
@@ -551,40 +463,39 @@ js_repl = false
 	enableReq := httptest.NewRequest(http.MethodPost, "/dashboard/codex/gateway", bytes.NewReader([]byte(`{"path":"`+codexPath+`","id":"openai","enabled":true}`)))
 	enableW := httptest.NewRecorder()
 	handler.ServeHTTP(enableW, enableReq)
-	if enableW.Code != http.StatusOK {
-		t.Fatalf("enable status = %d, body = %s", enableW.Code, enableW.Body.String())
+	if enableW.Code != http.StatusConflict {
+		t.Fatalf("enable status = %d, want %d; body = %s", enableW.Code, http.StatusConflict, enableW.Body.String())
 	}
 	written, err := os.ReadFile(codexPath)
 	if err != nil {
 		t.Fatalf("ReadFile() error = %v", err)
 	}
-	for _, want := range []string{`model_provider = "openai"`, `[model_providers.openai]`, `base_url = "http://127.0.0.1:4141/a/codex/openai/v1"`, `[features]`} {
-		if !strings.Contains(string(written), want) {
-			t.Fatalf("codex config missing %q:\n%s", want, string(written))
-		}
+	if strings.Contains(string(written), "127.0.0.1:4141") || strings.Contains(string(written), "model_provider") {
+		t.Fatalf("disabled proxy changed codex config:\n%s", string(written))
 	}
-	p, ok := gatewayCfg.Provider("openai")
-	if !ok {
-		t.Fatal("gateway config.yaml missing provider after enable")
+	if _, ok := gatewayCfg.Provider("openai"); ok {
+		t.Fatal("disabled proxy registered a gateway provider")
 	}
-	if p.BaseURL != "https://api.openai.com" {
-		t.Fatalf("gateway provider = %+v, want passthrough https://api.openai.com", p)
-	}
+}
 
-	disableReq := httptest.NewRequest(http.MethodPost, "/dashboard/codex/gateway", bytes.NewReader([]byte(`{"path":"`+codexPath+`","id":"openai","enabled":false}`)))
-	disableW := httptest.NewRecorder()
-	handler.ServeHTTP(disableW, disableReq)
-	if disableW.Code != http.StatusOK {
-		t.Fatalf("disable status = %d, body = %s", disableW.Code, disableW.Body.String())
-	}
-	written2, err := os.ReadFile(codexPath)
+func TestCodexGatewayRejectsNonOpenAIProvider(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "router.db"))
 	if err != nil {
-		t.Fatalf("ReadFile() error = %v", err)
+		t.Fatalf("Open() error = %v", err)
 	}
-	if strings.Contains(string(written2), "model_provider") || strings.Contains(string(written2), "[model_providers.openai]") {
-		t.Fatalf("codex gateway config not removed:\n%s", string(written2))
+	defer database.Close()
+	dir := t.TempDir()
+	codexPath := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(codexPath, []byte(`model = "gpt-5.5"`), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
 	}
-	if _, ok := gatewayCfg.Provider("openai"); !ok {
-		t.Fatal("codex disable should not delete the gateway upstream provider")
+	handler := newWithOptions(database, Options{CodexConfigPath: codexPath, GatewayBaseURL: "http://127.0.0.1:4141"})
+
+	req := httptest.NewRequest(http.MethodPost, "/dashboard/codex/gateway", bytes.NewReader([]byte(`{"path":"`+codexPath+`","id":"deepseek","enabled":true}`)))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body = %s", w.Code, w.Body.String())
 	}
 }

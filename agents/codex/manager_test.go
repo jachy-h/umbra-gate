@@ -18,4 +18,7 @@ func TestStatusDefaultsToOfficialOpenAIProviderOnly(t *testing.T) {
 	if len(status.Bindings) != 1 || status.Bindings[0].ProviderID != "openai" {
 		t.Fatalf("bindings = %+v, want only openai", status.Bindings)
 	}
+	if status.GatewayCapable || status.GatewayDisabledReason == "" {
+		t.Fatalf("status = %+v, want gateway temporarily unavailable", status)
+	}
 }

@@ -22,12 +22,14 @@ type Manager interface {
 }
 
 type Status struct {
-	AgentID        string          `json:"agent_id"`
-	DisplayName    string          `json:"display_name"`
-	ConfigFiles    []ConfigFile    `json:"config_files"`
-	Bindings       []BindingStatus `json:"bindings"`
-	GatewayCapable bool            `json:"gateway_capable"`
-	FineGrained    bool            `json:"fine_grained"`
+	AgentID               string          `json:"agent_id"`
+	DisplayName           string          `json:"display_name"`
+	ConfigFiles           []ConfigFile    `json:"config_files"`
+	Bindings              []BindingStatus `json:"bindings"`
+	GatewayCapable        bool            `json:"gateway_capable"`
+	GatewayDisabledReason string          `json:"gateway_disabled_reason,omitempty"`
+	FineGrained           bool            `json:"fine_grained"`
+	ProxyMethod           string          `json:"proxy_method"`
 }
 
 type BindingStatus struct {

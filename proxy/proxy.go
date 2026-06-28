@@ -23,6 +23,7 @@ type routeContext struct {
 	RemainingPath string
 	Endpoint      string
 	ProjectID     string
+	CodexLocal    bool
 }
 
 func New(cfg *config.Config, database *db.DB) *Proxy {
@@ -48,7 +49,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unknown provider", http.StatusNotFound)
 		return
 	}
-	upstream, err := buildUpstreamURL(providerCfg.BaseURL, route.RemainingPath, r.URL.RawQuery)
+	upstream, err := buildUpstreamURL(providerCfg.BaseURL, route.upstreamPath(providerCfg.BaseURL), r.URL.RawQuery)
 	if err != nil {
 		slog.Error("invalid provider base_url", "provider", route.ProviderName, "agent", route.AgentID, "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -77,6 +78,11 @@ func parseRoute(r *http.Request) (routeContext, bool) {
 		if len(parts) > 3 {
 			route.RemainingPath = strings.Join(parts[3:], "/")
 		}
+	} else if codexPath, ok := parseCodexLocalProxyPath(parts); ok {
+		route.AgentID = "codex"
+		route.ProviderName = "openai"
+		route.RemainingPath = codexPath
+		route.CodexLocal = true
 	} else {
 		route.ProviderName = strings.TrimSpace(parts[0])
 		if len(parts) > 1 {
@@ -85,6 +91,56 @@ func parseRoute(r *http.Request) (routeContext, bool) {
 	}
 	route.Endpoint = route.RemainingPath
 	return route, route.ProviderName != ""
+}
+
+func (r routeContext) upstreamPath(baseURL string) string {
+	if !r.CodexLocal && r.AgentID != "codex" {
+		return r.RemainingPath
+	}
+	base, err := url.Parse(baseURL)
+	if err != nil {
+		return r.RemainingPath
+	}
+	if strings.Trim(strings.TrimRight(base.Path, "/"), "/") == "v1" && strings.HasPrefix(r.RemainingPath, "v1/") {
+		return strings.TrimPrefix(r.RemainingPath, "v1/")
+	}
+	return r.RemainingPath
+}
+
+func parseCodexLocalProxyPath(parts []string) (string, bool) {
+	if len(parts) == 0 {
+		return "", false
+	}
+	if parts[0] == "codex" {
+		if len(parts) < 2 || parts[1] != "v1" {
+			return "", false
+		}
+		parts = parts[1:]
+	}
+	if parts[0] == "v1" {
+		if len(parts) < 2 || !isCodexOpenAIEndpoint(parts[1:]) {
+			return "", false
+		}
+		return strings.Join(parts, "/"), true
+	}
+	if isCodexOpenAIEndpoint(parts) {
+		return strings.Join(parts, "/"), true
+	}
+	return "", false
+}
+
+func isCodexOpenAIEndpoint(parts []string) bool {
+	if len(parts) == 0 {
+		return false
+	}
+	switch parts[0] {
+	case "responses", "models":
+		return true
+	case "chat":
+		return len(parts) >= 2 && parts[1] == "completions"
+	default:
+		return false
+	}
 }
 
 // buildUpstreamURL safely joins the provider base URL with the client-supplied

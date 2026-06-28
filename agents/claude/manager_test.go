@@ -64,6 +64,9 @@ func TestStatusDetectsGatewayAndDisableRemovesManagedValues(t *testing.T) {
 	if len(status.Bindings) != 1 || !status.Bindings[0].GatewayEnabled || !status.Bindings[0].Active {
 		t.Fatalf("status = %+v, want enabled binding", status)
 	}
+	if status.GatewayCapable || status.GatewayDisabledReason == "" {
+		t.Fatalf("status = %+v, want new gateway enables disabled", status)
+	}
 
 	plan, err := manager.Plan(ctx, agents.BindingInput{Enabled: false})
 	if err != nil {

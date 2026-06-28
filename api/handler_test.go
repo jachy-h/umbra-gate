@@ -247,7 +247,7 @@ func TestAgentsEndpointReturnsAgentStatuses(t *testing.T) {
 	}
 }
 
-func TestAgentPlanAndApplyEndpoints(t *testing.T) {
+func TestAgentEnableEndpointsRejectTemporarilyDisabledProxy(t *testing.T) {
 	database, err := db.Open(filepath.Join(t.TempDir(), "router.db"))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
@@ -268,26 +268,49 @@ func TestAgentPlanAndApplyEndpoints(t *testing.T) {
 	planReq := httptest.NewRequest(http.MethodPost, "/agents/claude-code/plan", strings.NewReader(`{"enabled":true}`))
 	planW := httptest.NewRecorder()
 	handler.ServeHTTP(planW, planReq)
-	if planW.Code != http.StatusOK {
-		t.Fatalf("plan status = %d, body = %s", planW.Code, planW.Body.String())
-	}
-	var plan agents.Plan
-	if err := json.NewDecoder(planW.Body).Decode(&plan); err != nil {
-		t.Fatalf("Decode(plan) error = %v", err)
+	if planW.Code != http.StatusConflict {
+		t.Fatalf("plan status = %d, want %d; body = %s", planW.Code, http.StatusConflict, planW.Body.String())
 	}
 
-	applyReq := httptest.NewRequest(http.MethodPost, "/agents/claude-code/apply", strings.NewReader(`{"enabled":true,"base_checksum":"`+plan.BaseChecksum+`"}`))
+	applyReq := httptest.NewRequest(http.MethodPost, "/agents/claude-code/apply", strings.NewReader(`{"enabled":true,"base_checksum":"unused"}`))
 	applyW := httptest.NewRecorder()
 	handler.ServeHTTP(applyW, applyReq)
-	if applyW.Code != http.StatusOK {
-		t.Fatalf("apply status = %d, body = %s", applyW.Code, applyW.Body.String())
+	if applyW.Code != http.StatusConflict {
+		t.Fatalf("apply status = %d, want %d; body = %s", applyW.Code, http.StatusConflict, applyW.Body.String())
 	}
 	written, err := os.ReadFile(claudePath)
 	if err != nil {
 		t.Fatalf("ReadFile() error = %v", err)
 	}
-	if !strings.Contains(string(written), "http://127.0.0.1:4141/a/claude-code/anthropic") {
-		t.Fatalf("settings not written: %s", string(written))
+	if strings.Contains(string(written), "http://127.0.0.1:4141/a/claude-code/anthropic") {
+		t.Fatalf("disabled proxy was written: %s", string(written))
+	}
+
+	if err := os.WriteFile(claudePath, []byte(`{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:4141/a/claude-code/anthropic","ANTHROPIC_AUTH_TOKEN":"PROXY_MANAGED"}}`), 0o600); err != nil {
+		t.Fatalf("WriteFile(managed config) error = %v", err)
+	}
+	disablePlanReq := httptest.NewRequest(http.MethodPost, "/agents/claude-code/plan", strings.NewReader(`{"enabled":false}`))
+	disablePlanW := httptest.NewRecorder()
+	handler.ServeHTTP(disablePlanW, disablePlanReq)
+	if disablePlanW.Code != http.StatusOK {
+		t.Fatalf("disable plan status = %d, body = %s", disablePlanW.Code, disablePlanW.Body.String())
+	}
+	var disablePlan agents.Plan
+	if err := json.NewDecoder(disablePlanW.Body).Decode(&disablePlan); err != nil {
+		t.Fatalf("Decode(disable plan) error = %v", err)
+	}
+	disableApplyReq := httptest.NewRequest(http.MethodPost, "/agents/claude-code/apply", strings.NewReader(`{"enabled":false,"base_checksum":"`+disablePlan.BaseChecksum+`"}`))
+	disableApplyW := httptest.NewRecorder()
+	handler.ServeHTTP(disableApplyW, disableApplyReq)
+	if disableApplyW.Code != http.StatusOK {
+		t.Fatalf("disable apply status = %d, body = %s", disableApplyW.Code, disableApplyW.Body.String())
+	}
+	written, err = os.ReadFile(claudePath)
+	if err != nil {
+		t.Fatalf("ReadFile(disabled config) error = %v", err)
+	}
+	if strings.Contains(string(written), "ANTHROPIC_BASE_URL") || strings.Contains(string(written), "PROXY_MANAGED") {
+		t.Fatalf("managed proxy values were not removed: %s", string(written))
 	}
 }
 

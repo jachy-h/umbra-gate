@@ -91,7 +91,7 @@ func (p *Proxy) handlePassthrough(w http.ResponseWriter, r *http.Request, route 
 	}
 }
 
-func (p *Proxy) buildPassthroughRequest(r *http.Request, providerCfg *config.ProviderConfig, upstream *url.URL, bodyBytes []byte) (*http.Request, error) {
+func (p *Proxy) buildPassthroughRequest(r *http.Request, route routeContext, providerCfg *config.ProviderConfig, upstream *url.URL, bodyBytes []byte) (*http.Request, error) {
 	req, err := http.NewRequestWithContext(r.Context(), r.Method, upstream.String(), bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, err
@@ -102,7 +102,7 @@ func (p *Proxy) buildPassthroughRequest(r *http.Request, providerCfg *config.Pro
 }
 
 func (p *Proxy) proxyPassthroughNonStream(w http.ResponseWriter, r *http.Request, route routeContext, providerCfg *config.ProviderConfig, upstream *url.URL, bodyBytes []byte, sessionID int64, startTime time.Time) {
-	req, err := p.buildPassthroughRequest(r, providerCfg, upstream, bodyBytes)
+	req, err := p.buildPassthroughRequest(r, route, providerCfg, upstream, bodyBytes)
 	if err != nil {
 		errMsg := err.Error()
 		p.db.CompleteSession(sessionID, 0, 0, 0, &errMsg)
@@ -204,7 +204,7 @@ func (p *Proxy) proxyPassthroughNonStream(w http.ResponseWriter, r *http.Request
 }
 
 func (p *Proxy) proxyPassthroughStream(w http.ResponseWriter, r *http.Request, route routeContext, providerCfg *config.ProviderConfig, upstream *url.URL, bodyBytes []byte, sessionID int64, startTime time.Time) {
-	req, err := p.buildPassthroughRequest(r, providerCfg, upstream, bodyBytes)
+	req, err := p.buildPassthroughRequest(r, route, providerCfg, upstream, bodyBytes)
 	if err != nil {
 		errMsg := err.Error()
 		p.db.CompleteSession(sessionID, 0, 0, 0, &errMsg)

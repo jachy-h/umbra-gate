@@ -21,7 +21,18 @@ const (
 	DefaultProviderName = "Umbragate OpenAI"
 	DefaultEnvKey       = "OPENAI_API_KEY"
 	DefaultWireAPI      = "responses"
+	// CustomProviderID is used as the gateway model_provider when the active
+	// provider is a reserved built-in (like "openai"). Codex rejects overriding
+	// built-in provider ids, so gateway takeover mirrors the cc-switch pattern
+	// and switches routing to a non-reserved "custom" entry.
+	CustomProviderID = "custom"
 )
+
+// reservedProviderIDs are built-in Codex provider ids that cannot be overridden
+// in model_providers.
+var reservedProviderIDs = map[string]struct{}{
+	"openai": {},
+}
 
 const (
 	GatewayEnable  = "enable"
@@ -196,6 +207,18 @@ func (m Manager) Statuses(ids []string, gatewayBaseURL string) ([]ProviderStatus
 		status.Configured = len(table) > 0
 		status.Active = cfg.Top["model_provider"] == id
 		status.GatewayEnabled = gatewayURLMatches(status.BaseURL, gatewayBaseURL, id)
+		if !status.GatewayEnabled {
+			// When gateway takeover routes through the managed "custom" provider,
+			// the requested id (e.g. openai) may not have its own table. Detect
+			// gateway state by checking the active custom entry instead.
+			customTable := cfg.ProviderTable(CustomProviderID)
+			if cfg.Top["model_provider"] == CustomProviderID && len(customTable) > 0 && gatewayURLMatches(customTable["base_url"], gatewayBaseURL, id) {
+				status.GatewayEnabled = true
+				if status.BaseURL == "" {
+					status.BaseURL = customTable["base_url"]
+				}
+			}
+		}
 		out = append(out, status)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
@@ -208,16 +231,21 @@ func ApplyToText(raw []byte, input ProviderInput) ([]byte, error) {
 		return nil, err
 	}
 	text := string(normalizeTrailingNewline(raw))
+	if input.Gateway == GatewayEnable {
+		text = enableCodexGateway(text, input)
+		return []byte(strings.TrimRight(text, "\n") + "\n"), nil
+	}
+	if input.Gateway == GatewayDisable {
+		text = disableCodexGateway(text, input)
+		return []byte(strings.TrimRight(text, "\n") + "\n"), nil
+	}
 	text = removeProviderTable(text, input.ID)
-	if input.Delete || input.Gateway == GatewayDisable {
+	if input.Delete {
 		cfg := parse([]byte(text))
 		if cfg.Top["model_provider"] == input.ID {
 			text = upsertTopLevelString(text, "model_provider", "")
 		}
 		return []byte(strings.TrimRight(text, "\n") + "\n"), nil
-	}
-	if input.Gateway == GatewayEnable {
-		input.BaseURL = gatewayURL(input.GatewayBaseURL, input.ID)
 	}
 	text = upsertTopLevelString(text, "model_provider", input.ID)
 	text = strings.TrimRight(text, "\n")
@@ -294,10 +322,10 @@ func gatewayURL(baseURL, id string) string {
 func gatewayURLMatches(baseURL, gatewayBaseURL, id string) bool {
 	current := strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	base := strings.TrimRight(strings.TrimSpace(gatewayBaseURL), "/")
-	escapedID := url.PathEscape(id)
 	return current == gatewayURL(gatewayBaseURL, id) ||
-		current == base+"/"+id+"/v1" ||
-		current == base+"/"+escapedID+"/v1"
+		current == base+"/v1" ||
+		current == base+"/a/codex/"+id+"/v1" ||
+		current == base+"/"+id+"/v1"
 }
 
 type parsedConfig struct {
@@ -388,6 +416,159 @@ func removeProviderTable(text, id string) string {
 		if !skip {
 			out = append(out, line)
 		}
+	}
+	return strings.TrimRight(strings.Join(out, "\n"), "\n") + "\n"
+}
+
+// enableCodexGateway routes Codex traffic through the gateway by rewriting the
+// active provider's base_url. When the active provider is a reserved built-in
+// (like "openai") or unset, it switches routing to a non-reserved "custom"
+// entry — Codex rejects overriding built-in ids in model_providers. For an
+// already-active non-reserved provider, only base_url is rewritten and all
+// other keys (name, env_key, wire_api, ...) are preserved.
+func enableCodexGateway(text string, input ProviderInput) string {
+	cfg := parse([]byte(text))
+	active := cfg.Top["model_provider"]
+	_, reserved := reservedProviderIDs[active]
+	if active != "" && !reserved {
+		return rewriteProviderBaseURL(text, active, input.BaseURL)
+	}
+	// Active is empty or reserved: route through custom provider table.
+	text = upsertTopLevelString(text, "model_provider", CustomProviderID)
+	return upsertCustomProviderTable(text, input.BaseURL, input.WireAPI)
+}
+
+// disableCodexGateway reverses the gateway takeover. It strips a
+// gateway-matching base_url from the active provider table (or top-level),
+// preserving all other keys. Only the managed "custom" table created solely for
+// gateway routing is removed wholesale.
+func disableCodexGateway(text string, input ProviderInput) string {
+	cfg := parse([]byte(text))
+	active := cfg.Top["model_provider"]
+	if active == CustomProviderID {
+		table := cfg.ProviderTable(CustomProviderID)
+		baseURL := table["base_url"]
+		if baseURL != "" && gatewayURLMatches(baseURL, input.GatewayBaseURL, input.ID) {
+			if isManagedCustomProvider(table) {
+				text = removeProviderTable(text, CustomProviderID)
+				text = upsertTopLevelString(text, "model_provider", "")
+				return text
+			}
+			return stripGatewayBaseURL(text, active, input.GatewayBaseURL, input.ID)
+		}
+	}
+	return stripGatewayBaseURL(text, active, input.GatewayBaseURL, input.ID)
+}
+
+// isManagedCustomProvider returns true when the custom table was created solely
+// by gateway enable. Tables that carry user credentials or a non-default auth
+// shape are left in place and only their base_url is stripped on disable.
+func isManagedCustomProvider(table map[string]string) bool {
+	if len(table) == 0 {
+		return false
+	}
+	if name, ok := table["name"]; !ok || name != "Umbragate" {
+		return false
+	}
+	if envKey := strings.TrimSpace(table["env_key"]); envKey != "" && envKey != DefaultEnvKey {
+		return false
+	}
+	for _, reserved := range []string{"experimental_bearer_token", "api_key"} {
+		if v, ok := table[reserved]; ok && v != "" {
+			return false
+		}
+	}
+	return true
+}
+
+// rewriteProviderBaseURL replaces base_url inside [model_providers.<id>],
+// preserving all other keys.
+func rewriteProviderBaseURL(text, providerID, baseURL string) string {
+	tableID := "model_providers." + providerID
+	lines := strings.Split(text, "\n")
+	var out []string
+	insideTarget := false
+	written := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+			table := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(trimmed, "["), "]"))
+			insideTarget = table == tableID
+		}
+		if insideTarget && isAssignmentFor(trimmed, "base_url") {
+			if !written {
+				out = append(out, fmt.Sprintf("base_url = %q", baseURL))
+				written = true
+			}
+			continue
+		}
+		out = append(out, line)
+	}
+	if !written {
+		out = ensureProviderTable(out, tableID, baseURL)
+	}
+	return strings.TrimRight(strings.Join(out, "\n"), "\n") + "\n"
+}
+
+// ensureProviderTable appends a [model_providers.<id>] table with base_url when
+// the active provider table was missing entirely.
+func ensureProviderTable(lines []string, tableID, baseURL string) []string {
+	hasTable := false
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "["+tableID+"]" {
+			hasTable = true
+			break
+		}
+	}
+	if hasTable {
+		return lines
+	}
+	out := lines
+	if len(out) > 0 && strings.TrimSpace(out[len(out)-1]) != "" {
+		out = append(out, "")
+	}
+	out = append(out, "["+tableID+"]")
+	out = append(out, fmt.Sprintf("base_url = %q", baseURL))
+	return out
+}
+
+// upsertCustomProviderTable creates or replaces [model_providers.custom] with
+// the gateway base_url and wire_api, keeping unrelated top-level keys intact.
+// Codex auth remains enabled so Codex can use its own auth.json login state and
+// pass Authorization through the local gateway.
+func upsertCustomProviderTable(text, baseURL, wireAPI string) string {
+	text = removeProviderTable(text, CustomProviderID)
+	text = strings.TrimRight(text, "\n")
+	if text != "" {
+		text += "\n\n"
+	}
+	text += fmt.Sprintf("[model_providers.%s]\n", CustomProviderID)
+	text += fmt.Sprintf("name = \"Umbragate\"\n")
+	text += fmt.Sprintf("base_url = %q\n", baseURL)
+	text += fmt.Sprintf("wire_api = %q\n", wireAPI)
+	text += "requires_openai_auth = true\n"
+	return text
+}
+
+// stripGatewayBaseURL removes a gateway-matching base_url from the active
+// provider table (or top-level), leaving unrelated config intact.
+func stripGatewayBaseURL(text, active, gatewayBaseURL, id string) string {
+	lines := strings.Split(text, "\n")
+	var out []string
+	insideTarget := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+			table := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(trimmed, "["), "]"))
+			insideTarget = active != "" && table == "model_providers."+active
+		}
+		if (insideTarget || active == "") && isAssignmentFor(trimmed, "base_url") {
+			_, value, ok := parseStringAssignment(trimmed)
+			if ok && gatewayURLMatches(value, gatewayBaseURL, id) {
+				continue
+			}
+		}
+		out = append(out, line)
 	}
 	return strings.TrimRight(strings.Join(out, "\n"), "\n") + "\n"
 }

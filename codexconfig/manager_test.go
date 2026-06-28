@@ -21,13 +21,13 @@ command = "node"
 	text := string(out)
 	for _, want := range []string{
 		`model = "gpt-5.5"`,
-		`model_provider = "openai"`,
-		`[mcp_servers.node_repl]`,
-		`[model_providers.openai]`,
-		`name = "Umbragate OpenAI"`,
+		`model_provider = "custom"`,
+		`[model_providers.custom]`,
 		`base_url = "http://127.0.0.1:4141/a/codex/openai/v1"`,
-		`env_key = "OPENAI_API_KEY"`,
 		`wire_api = "responses"`,
+		`requires_openai_auth = true`,
+		`[mcp_servers.node_repl]`,
+		`command = "node"`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("output missing %q:\n%s", want, text)
@@ -35,10 +35,70 @@ command = "node"
 	}
 }
 
-func TestApplyToTextReplacesExistingProviderTable(t *testing.T) {
+func TestApplyToTextEnablesGatewayForReservedOpenAI(t *testing.T) {
 	raw := []byte(`model_provider = "openai"
+model = "gpt-5.5"
+`)
 
-[model_providers.openai]
+	out, err := ApplyToText(raw, ProviderInput{ID: "openai", Gateway: GatewayEnable, GatewayBaseURL: "http://127.0.0.1:4141"})
+	if err != nil {
+		t.Fatalf("ApplyToText() error = %v", err)
+	}
+	text := string(out)
+	if strings.Contains(text, `[model_providers.openai]`) {
+		t.Fatalf("must not create reserved [model_providers.openai] table:\n%s", text)
+	}
+	for _, want := range []string{
+		`model_provider = "custom"`,
+		`[model_providers.custom]`,
+		`base_url = "http://127.0.0.1:4141/a/codex/openai/v1"`,
+		`requires_openai_auth = true`,
+		`model = "gpt-5.5"`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("output missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestApplyToTextEnablesGatewayProviderInActiveTable(t *testing.T) {
+	raw := []byte(`model_provider = "custom"
+model = "gpt-5.5"
+
+[model_providers.custom]
+name = "MyCustom"
+base_url = "https://api.example.com/v1"
+env_key = "MY_KEY"
+wire_api = "responses"
+`)
+
+	out, err := ApplyToText(raw, ProviderInput{ID: "openai", Gateway: GatewayEnable, GatewayBaseURL: "http://127.0.0.1:4141"})
+	if err != nil {
+		t.Fatalf("ApplyToText() error = %v", err)
+	}
+	text := string(out)
+	for _, want := range []string{
+		`model_provider = "custom"`,
+		`[model_providers.custom]`,
+		`name = "MyCustom"`,
+		`base_url = "http://127.0.0.1:4141/a/codex/openai/v1"`,
+		`env_key = "MY_KEY"`,
+		`wire_api = "responses"`,
+		`model = "gpt-5.5"`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("output missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "https://api.example.com") {
+		t.Fatalf("old base_url should be replaced:\n%s", text)
+	}
+}
+
+func TestApplyToTextReplacesExistingProviderTable(t *testing.T) {
+	raw := []byte(`model_provider = "custom"
+
+[model_providers.custom]
 name = "Old"
 base_url = "https://old.example/v1"
 env_key = "OLD_KEY"
@@ -48,15 +108,15 @@ wire_api = "chat"
 trust_level = "trusted"
 `)
 
-	out, err := ApplyToText(raw, ProviderInput{ID: "openai", Gateway: GatewayEnable, GatewayBaseURL: "http://127.0.0.1:4141"})
+	out, err := ApplyToText(raw, ProviderInput{ID: "custom", Name: "New", BaseURL: "https://new.example/v1", EnvKey: "NEW_KEY", WireAPI: "responses"})
 	if err != nil {
 		t.Fatalf("ApplyToText() error = %v", err)
 	}
 	text := string(out)
-	if strings.Contains(text, "https://old.example") || strings.Contains(text, "OLD_KEY") {
+	if strings.Contains(text, "https://old.example") || strings.Contains(text, "OLD_KEY") || strings.Contains(text, "wire_api = \"chat\"") {
 		t.Fatalf("old provider table was not replaced:\n%s", text)
 	}
-	if strings.Count(text, "[model_providers.openai]") != 1 {
+	if strings.Count(text, "[model_providers.custom]") != 1 {
 		t.Fatalf("provider table count wrong:\n%s", text)
 	}
 	if !strings.Contains(text, `[projects."/tmp"]`) {
@@ -65,29 +125,74 @@ trust_level = "trusted"
 }
 
 func TestApplyToTextDisablesGatewayProvider(t *testing.T) {
-	raw := []byte(`model_provider = "openai"
+	raw := []byte(`model_provider = "custom"
 model = "gpt-5.5"
 
-[model_providers.openai]
-name = "Umbragate OpenAI"
+[model_providers.custom]
+name = "Umbragate"
 base_url = "http://127.0.0.1:4141/a/codex/openai/v1"
-env_key = "OPENAI_API_KEY"
 wire_api = "responses"
+requires_openai_auth = true
 
 [features]
 js_repl = false
 `)
 
-	out, err := ApplyToText(raw, ProviderInput{ID: "openai", Gateway: GatewayDisable})
+	out, err := ApplyToText(raw, ProviderInput{ID: "openai", Gateway: GatewayDisable, GatewayBaseURL: "http://127.0.0.1:4141"})
 	if err != nil {
 		t.Fatalf("ApplyToText() error = %v", err)
 	}
 	text := string(out)
-	if strings.Contains(text, "model_provider") || strings.Contains(text, "[model_providers.openai]") {
-		t.Fatalf("gateway provider not removed:\n%s", text)
+	if strings.Contains(text, "http://127.0.0.1:4141/a/codex/openai/v1") {
+		t.Fatalf("gateway base_url not removed:\n%s", text)
 	}
-	if !strings.Contains(text, `model = "gpt-5.5"`) || !strings.Contains(text, `[features]`) {
-		t.Fatalf("unrelated config not preserved:\n%s", text)
+	if strings.Contains(text, "model_provider") {
+		t.Fatalf("managed model_provider should be removed on disable:\n%s", text)
+	}
+	if strings.Contains(text, "[model_providers.custom]") {
+		t.Fatalf("managed custom table should be removed on disable:\n%s", text)
+	}
+	for _, want := range []string{
+		`model = "gpt-5.5"`,
+		`[features]`,
+		`js_repl = false`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("output missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestApplyToTextDisablesGatewayProviderInActiveTable(t *testing.T) {
+	raw := []byte(`model_provider = "custom"
+model = "gpt-5.5"
+
+[model_providers.custom]
+name = "MyCustom"
+base_url = "http://127.0.0.1:4141/v1"
+env_key = "MY_KEY"
+wire_api = "responses"
+`)
+
+	out, err := ApplyToText(raw, ProviderInput{ID: "openai", Gateway: GatewayDisable, GatewayBaseURL: "http://127.0.0.1:4141"})
+	if err != nil {
+		t.Fatalf("ApplyToText() error = %v", err)
+	}
+	text := string(out)
+	if strings.Contains(text, "http://127.0.0.1:4141/v1") {
+		t.Fatalf("gateway base_url not stripped:\n%s", text)
+	}
+	for _, want := range []string{
+		`model_provider = "custom"`,
+		`[model_providers.custom]`,
+		`name = "MyCustom"`,
+		`env_key = "MY_KEY"`,
+		`wire_api = "responses"`,
+		`model = "gpt-5.5"`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("output missing %q:\n%s", want, text)
+		}
 	}
 }
 
@@ -111,13 +216,13 @@ func TestManagerApplyUsesChecksum(t *testing.T) {
 
 func TestStatusesDetectGatewayProvider(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
-	if err := os.WriteFile(path, []byte(`model_provider = "openai"
+	if err := os.WriteFile(path, []byte(`model_provider = "custom"
 
-[model_providers.openai]
-name = "Umbragate OpenAI"
-base_url = "http://127.0.0.1:4141/openai/v1"
-env_key = "OPENAI_API_KEY"
+[model_providers.custom]
+name = "Umbragate"
+base_url = "http://127.0.0.1:4141/a/codex/openai/v1"
 wire_api = "responses"
+requires_openai_auth = true
 `), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
@@ -125,7 +230,7 @@ wire_api = "responses"
 	if err != nil {
 		t.Fatalf("Statuses() error = %v", err)
 	}
-	if len(statuses) != 1 || !statuses[0].Active || !statuses[0].GatewayEnabled || !statuses[0].Configured {
-		t.Fatalf("statuses = %+v, want active configured gateway provider", statuses)
+	if len(statuses) != 1 || !statuses[0].GatewayEnabled {
+		t.Fatalf("statuses = %+v, want gateway-enabled via custom provider", statuses)
 	}
 }

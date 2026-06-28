@@ -64,6 +64,7 @@ func (m Manager) Status(ctx agents.Context) (*agents.Status, error) {
 		Bindings:       bindings,
 		GatewayCapable: true,
 		FineGrained:    true,
+		ProxyMethod:    "Config File (provider.options.baseURL)",
 	}, nil
 }
 

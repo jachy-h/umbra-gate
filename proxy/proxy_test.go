@@ -118,6 +118,7 @@ func TestProxyAgentAwareRouteRecordsAttribution(t *testing.T) {
 	p := New(cfg, database)
 
 	req := httptest.NewRequest("POST", "/a/codex/openai/v1/responses?foo=bar", strings.NewReader(`{"model":"gpt-4o"}`))
+	req.Header.Set("Authorization", "Bearer codex-token")
 	req.Header.Set("X-Umbra-Project", "gateway-redesign")
 	w := httptest.NewRecorder()
 	p.ServeHTTP(w, req)
@@ -127,6 +128,9 @@ func TestProxyAgentAwareRouteRecordsAttribution(t *testing.T) {
 	}
 	if got := captured.url.Path; got != "/v1/responses" {
 		t.Fatalf("upstream path = %q, want /v1/responses", got)
+	}
+	if got := captured.headers.Get("Authorization"); got != "Bearer codex-token" {
+		t.Fatalf("authorization = %q, want Codex auth passthrough", got)
 	}
 
 	sessions, err := database.ListSessions(10, 0)
@@ -142,6 +146,47 @@ func TestProxyAgentAwareRouteRecordsAttribution(t *testing.T) {
 	}
 	if got.Endpoint != "v1/responses" || got.Stream {
 		t.Fatalf("session route fields = %+v, want endpoint v1/responses and stream false", got)
+	}
+}
+
+func TestProxyCodexLocalV1RouteRecordsAttribution(t *testing.T) {
+	upstream, captured := newFakeUpstream(t, 200, `{"model":"gpt-4o","usage":{"prompt_tokens":10,"completion_tokens":20,"total_tokens":30}}`)
+	cfg := newTestConfig(t, "openai", config.ProviderConfig{
+		BaseURL:   upstream.URL + "/v1",
+		APIKey:    "sk-real",
+		APIKeyRaw: "sk-real",
+	})
+	database := newTestDB(t)
+	p := New(cfg, database)
+
+	req := httptest.NewRequest("POST", "/v1/responses?foo=bar", strings.NewReader(`{"model":"gpt-4o"}`))
+	req.Header.Set("Authorization", "Bearer codex-key")
+	w := httptest.NewRecorder()
+	p.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	if got := captured.url.Path; got != "/v1/responses" {
+		t.Fatalf("upstream path = %q, want /v1/responses", got)
+	}
+	if got := captured.url.RawQuery; got != "foo=bar" {
+		t.Fatalf("query = %q, want foo=bar", got)
+	}
+	if got := captured.headers.Get("Authorization"); got != "Bearer codex-key" {
+		t.Fatalf("authorization = %q, want passthrough Codex auth", got)
+	}
+
+	sessions, err := database.ListSessions(10, 0)
+	if err != nil {
+		t.Fatalf("ListSessions() error = %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("len(sessions) = %d, want 1", len(sessions))
+	}
+	got := sessions[0]
+	if got.AgentID != "codex" || got.ProviderName != "openai" || got.Endpoint != "v1/responses" {
+		t.Fatalf("session attribution = %+v, want codex/openai endpoint v1/responses", got)
 	}
 }
 

@@ -1,5 +1,6 @@
 # Binaries
 personal-ai-router
+umbragate
 *.exe
 *.out
 *.test
@@ -25,6 +26,7 @@ router.db-wal
 
 # Local dev tools
 .air.toml
+node_modules/
 tmp/
 
 # Local worktrees

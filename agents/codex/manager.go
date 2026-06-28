@@ -44,12 +44,14 @@ func (m Manager) Status(ctx agents.Context) (*agents.Status, error) {
 		})
 	}
 	return &agents.Status{
-		AgentID:        m.ID(),
-		DisplayName:    m.DisplayName(),
-		ConfigFiles:    files,
-		Bindings:       bindings,
-		GatewayCapable: true,
-		FineGrained:    false,
+		AgentID:               m.ID(),
+		DisplayName:           m.DisplayName(),
+		ConfigFiles:           files,
+		Bindings:              bindings,
+		GatewayCapable:        false,
+		GatewayDisabledReason: "Proxy support is temporarily disabled while a reliable integration is evaluated.",
+		FineGrained:           false,
+		ProxyMethod:           "Config File (baseURL)",
 	}, nil
 }
 
