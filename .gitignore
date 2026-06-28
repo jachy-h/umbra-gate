@@ -26,7 +26,9 @@ router.db-wal
 
 # Local dev tools
 .air.toml
+.agents/
 node_modules/
+skills-lock.json
 tmp/
 
 # Local worktrees
