@@ -11,6 +11,7 @@ import (
 	"github.com/jachy-h/llm-gateway-lite/internal/db"
 	"github.com/jachy-h/llm-gateway-lite/internal/proxy"
 	"github.com/jachy-h/llm-gateway-lite/internal/stats"
+	"github.com/jachy-h/llm-gateway-lite/internal/web"
 )
 
 func New(cfg config.Config, d *db.DB) (*gin.Engine, *stats.Service) {
@@ -60,6 +61,20 @@ func New(cfg config.Config, d *db.DB) (*gin.Engine, *stats.Service) {
 	r.POST("/llm-gateway-lite/:path", prox.ChatCompletions)
 
 	r.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) })
+
+	// Serve the embedded frontend SPA for any unmatched, non-API route so
+	// client-side routing works without a separate static host.
+	spa := web.Handler()
+	r.NoRoute(func(c *gin.Context) {
+		p := c.Request.URL.Path
+		if strings.HasPrefix(p, "/admin") ||
+			strings.HasPrefix(p, "/llm-gateway-lite") ||
+			p == "/healthz" {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+		spa.ServeHTTP(c.Writer, c.Request)
+	})
 
 	return r, statSvc
 }

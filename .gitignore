@@ -3,3 +3,15 @@ gateway.db
 gateway.db-shm
 gateway.db-wal
 *.log
+tmp/
+
+# Local scratch binary built by `make build`
+umbragate
+
+# Embedded frontend build output. A placeholder index.html is committed so
+# `go build` works without the web build; the real bundle is produced by
+# `make web` / `npm run build`.
+internal/web/dist/assets/
+internal/web/dist/*.svg
+internal/web/dist/favicon.svg
+internal/web/dist/icons.svg

@@ -1,8 +1,8 @@
 server:
   addr: ":8787"
 db:
-  path: "gateway.db"
+  path: ""  # 留空则使用 ~/.umbragate/umbragate.db （Windows 下为 %USERPROFILE%\.umbragate\）
 aggregator:
   interval_seconds: 60
 admin:
-  token: ""  # set to require X-Admin-Token on /admin/* routes
+  token: ""  # 设置后 /admin/* 路由要求 X-Admin-Token 或 Authorization: Bearer

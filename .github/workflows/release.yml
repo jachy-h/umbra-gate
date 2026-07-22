@@ -38,6 +38,20 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build frontend (embedded into the Go binary)
+        run: |
+          cd web
+          npm ci
+          npm run build
+          # Sanity-check the Vite output is visible to the Go embed directive.
+          test -f ../internal/web/dist/index.html
+
       - name: Set release metadata
         id: meta
         run: |
@@ -64,6 +78,8 @@ jobs:
             rm -rf "$root"
             mkdir -p "$root"
 
+            # Frontend assets built above are embedded at compile time, so the
+            # resulting binary is fully self-contained.
             CGO_ENABLED=0 GOOS=darwin GOARCH="$goarch" go build -trimpath -ldflags="-s -w" -o "$root/umbragate" .
             cp config.yaml "$root/config.yaml"
             tar -C "$root" -czf "dist/${archive}" umbragate config.yaml
