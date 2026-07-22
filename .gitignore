@@ -1,35 +1,5 @@
-# Binaries
-personal-ai-router
-umbragate
-*.exe
-*.out
-*.test
-
-# Local config backups
-config.yaml.*.bak
-
-# Database
-router.db
-router.db-*
-router.db-shm
-router.db-wal
-*.db
-*.db-*
-
-# Logs
+gw
+gateway.db
+gateway.db-shm
+gateway.db-wal
 *.log
-
-# OS and editors
-.DS_Store
-.idea/
-.vscode/
-
-# Local dev tools
-.air.toml
-.agents/
-node_modules/
-skills-lock.json
-tmp/
-
-# Local worktrees
-.worktrees/

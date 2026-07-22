@@ -1,0 +1,150 @@
+import { useEffect, useState } from 'react'
+import { api } from '../api'
+import type { ProxyLink, Provider } from '../types'
+import { useHash } from '../hooks/useHash'
+import { Card } from '../components/Card'
+import { Badge } from '../components/Badge'
+import { Button } from '../components/Button'
+import { Spinner } from '../components/Spinner'
+
+export function LinkManager() {
+  const [links, setLinks] = useState<ProxyLink[]>([])
+  const [providers, setProviders] = useState<Provider[]>([])
+  const [loading, setLoading] = useState(true)
+  const { navigate } = useHash()
+
+  const fetchAll = () => {
+    setLoading(true)
+    Promise.all([api.listLinks(), api.listProviders()])
+      .then(([l, p]) => {
+        setLinks(l)
+        setProviders(p)
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(() => { fetchAll() }, [])
+
+  const remove = async (id: string) => {
+    if (!confirm('Delete this proxy link?')) return
+    try {
+      await api.deleteLink(id)
+      fetchAll()
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : 'Delete failed') }
+  }
+
+  const gatewayBase = (import.meta.env.VITE_GATEWAY_BASE as string | undefined)?.replace(/\/$/, '') || `http://${window.location.hostname}:8787`
+
+  const proxyUrl = (path: string) => `${gatewayBase}/llm-gateway-lite/${path}`
+
+  const copyUrl = async (path: string) => {
+    const url = proxyUrl(path)
+    try {
+      await navigator.clipboard.writeText(url)
+    } catch {
+      const el = document.createElement('textarea')
+      el.value = url
+      document.body.appendChild(el)
+      el.select()
+      document.execCommand('copy')
+      document.body.removeChild(el)
+    }
+  }
+
+  const providerName = (id: string) => providers.find((p) => p.id === id)?.name || id
+
+  return (
+    <div className="space-y-8 animate-fade-in">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-[28px] font-semibold leading-[1.2] tracking-[-0.5px] text-[var(--color-ink)]">
+            Proxy Links
+          </h1>
+          <p className="mt-2 text-[var(--color-muted)] text-base">
+            Configure proxy routes with provider chaining for fallback.
+          </p>
+        </div>
+        <Button onClick={() => navigate('/links/new')}>+ New Link</Button>
+      </div>
+
+      {loading ? (
+        <Spinner />
+      ) : links.length === 0 ? (
+        <Card className="text-center text-[var(--color-muted)] py-16">
+          No proxy links configured. Create one to start routing requests.
+        </Card>
+      ) : (
+        <div className="overflow-hidden rounded-xl border border-[var(--color-hairline)] bg-[var(--color-canvas)]">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-[var(--color-hairline-soft)] text-left text-sm font-medium text-[var(--color-muted)]">
+                <th className="px-8 py-3 font-medium">Name</th>
+                <th className="px-8 py-3 font-medium">Proxy URL</th>
+                <th className="px-8 py-3 font-medium">Chain</th>
+                <th className="px-8 py-3 font-medium">Status</th>
+                <th className="px-8 py-3 font-medium w-32" />
+              </tr>
+            </thead>
+            <tbody>
+              {links.map((l) => (
+                <tr key={l.id} className="border-b border-[var(--color-hairline-soft)] last:border-b-0 hover:bg-[var(--color-surface-soft)] transition-colors">
+                  <td className="px-8 py-4 text-sm font-semibold text-[var(--color-ink)]">{l.name}</td>
+                  <td className="px-8 py-4 text-sm">
+                    <div className="flex items-center gap-2">
+                      <code
+                        className="font-mono text-xs text-[var(--color-muted)] bg-[var(--color-surface-soft)] px-2 py-1 rounded truncate block max-w-xs"
+                        title={proxyUrl(l.path)}
+                      >
+                        {proxyUrl(l.path)}
+                      </code>
+                      <button
+                        onClick={() => copyUrl(l.path)}
+                        className="inline-flex items-center justify-center w-6 h-6 rounded-md cursor-pointer hover:bg-[var(--color-surface-soft)] text-[var(--color-muted)] hover:text-[var(--color-ink)] transition-colors"
+                        title="Copy URL"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                        </svg>
+                      </button>
+                    </div>
+                  </td>
+                  <td className="px-8 py-4 text-sm">
+                    <div className="flex items-center flex-wrap gap-1.5">
+                      {l.chain?.map((c, i) => {
+                        const hasOverride = !!c.api_key
+                        return (
+                          <span key={i} className="flex items-center gap-1.5">
+                            {i > 0 && (
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-muted)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                                <path d="M5 12h14M13 5l7 7-7 7" />
+                              </svg>
+                            )}
+                            <Badge color={i === 0 ? 'violet' : i === l.chain!.length - 1 ? 'emerald' : 'orange'}>
+                              {providerName(c.provider_id)}
+                              {hasOverride && ' *'}
+                            </Badge>
+                          </span>
+                        )
+                      })}
+                    </div>
+                  </td>
+                  <td className="px-8 py-4 text-sm">
+                    <Badge color={l.enabled ? 'success' : 'error'}>{l.enabled ? 'Active' : 'Disabled'}</Badge>
+                  </td>
+                  <td className="px-8 py-4">
+                    <div className="flex gap-2">
+                      <Button variant="ghost" size="sm" onClick={() => navigate(`/links/edit/${l.id}`)}>Edit</Button>
+                      <Button variant="ghost" size="sm" onClick={() => remove(l.id)} className="!text-[var(--color-error)]">Del</Button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
