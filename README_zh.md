@@ -22,38 +22,21 @@ umbragate
 - **Provider 来者不拒。** 原生支持 OpenAI、Anthropic、Gemini、DeepSeek、Qwen。任意 OpenAI 兼容 API 即可作为自定义 Provider。热加载，无需重启。
 - **自带 Web 控制台。** React SPA 随二进制一同打包。在浏览器里管理链接、配置链路、查看统计 —— 不用敲 CLI，不用写配置（当然 config.yaml 需要时也在）。
 
-## 30 秒上手
+## 快速上手
 
 ```bash
-# 1. 添加 Provider
-curl -X POST localhost:8787/admin/providers -H 'Content-Type: application/json' -d '{
-  "name":"openai","type":"openai","base_url":"https://api.openai.com",
-  "api_key":"sk-...","models":["gpt-4o-mini"],"enabled":true}'
-
-curl -X POST localhost:8787/admin/providers -H 'Content-Type: application/json' -d '{
-  "name":"deepseek","type":"deepseek","base_url":"https://api.deepseek.com",
-  "api_key":"sk-...","models":["deepseek-chat"],"enabled":true}'
-
-# 2. 创建代理链接，配置故障切换链路
-curl -X POST localhost:8787/admin/links -H 'Content-Type: application/json' -d '{
-  "name":"my-gateway","attributes":{"team":"core"},
-  "chain":[
-    {"provider_id":"<openai-id>","retry_count":1,"rules":{"on_status_codes":[429,500,503]}},
-    {"provider_id":"<deepseek-id>","fallback_model":"deepseek-chat"}
-  ]}'
-
-# 3. 调用 —— 标准 OpenAI SDK / curl 兼容
-curl -X POST localhost:8787/llm-gateway-lite/<path>/v1/chat/completions \
-  -H 'Content-Type: application/json' \
-  -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hello"}]}'
+brew tap jachy-h/umbragate && brew trust --tap jachy-h/umbragate && brew install umbragate
+umbragate
 ```
 
-## 安装
+或从源码构建：`make && ./umbragate`（需要 Go + Node.js）。
 
-```bash
-brew tap jachy-h/umbragate && brew trust --tap jachy-h/umbragate && brew install umbragate   # macOS / Linux
-# 或者：make && ./umbragate                           # 从源码构建（需要 Go + Node.js）
-```
+1. 打开 **http://localhost:8787** — 内置 Web 控制台。
+2. 添加你的 Provider（OpenAI、Anthropic、DeepSeek 等），填入 API Key。
+3. 创建代理链接，按优先级堆叠 Provider，配置故障切换规则。
+4. 复制链接 URL，填入你喜欢的 AI 客户端 —— OpenCode、Cursor、ChatGPT 客户端，或任何 OpenAI 兼容工具。
+
+搞定。请求自动带故障切换、日志记录和统计分析。
 
 所有数据存放在 `~/.umbragate/` 下 —— 配置、数据库都在这里。迁移或重置只需移动该目录。
 

@@ -22,38 +22,21 @@ umbragate
 - **Provider freedom.** Native support for OpenAI, Anthropic, Gemini, DeepSeek, Qwen. Any OpenAI-compatible API works as a custom provider. Hot-reload — no restarts.
 - **Web console included.** A React SPA ships inside the binary. Manage links, configure chains, browse stats — all from the browser.
 
-## 30-Second Demo
+## Getting Started
 
 ```bash
-# 1. Add providers
-curl -X POST localhost:8787/admin/providers -H 'Content-Type: application/json' -d '{
-  "name":"openai","type":"openai","base_url":"https://api.openai.com",
-  "api_key":"sk-...","models":["gpt-4o-mini"],"enabled":true}'
-
-curl -X POST localhost:8787/admin/providers -H 'Content-Type: application/json' -d '{
-  "name":"deepseek","type":"deepseek","base_url":"https://api.deepseek.com",
-  "api_key":"sk-...","models":["deepseek-chat"],"enabled":true}'
-
-# 2. Create a link with fallback chain
-curl -X POST localhost:8787/admin/links -H 'Content-Type: application/json' -d '{
-  "name":"my-gateway","attributes":{"team":"core"},
-  "chain":[
-    {"provider_id":"<openai-id>","retry_count":1,"rules":{"on_status_codes":[429,500,503]}},
-    {"provider_id":"<deepseek-id>","fallback_model":"deepseek-chat"}
-  ]}'
-
-# 3. Use it — standard OpenAI SDK / curl compatible
-curl -X POST localhost:8787/llm-gateway-lite/<path>/v1/chat/completions \
-  -H 'Content-Type: application/json' \
-  -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hello"}]}'
+brew tap jachy-h/umbragate && brew trust --tap jachy-h/umbragate && brew install umbragate
+umbragate
 ```
 
-## Install
+Or build from source: `make && ./umbragate` (requires Go + Node.js).
 
-```bash
-brew tap jachy-h/umbragate && brew trust --tap jachy-h/umbragate && brew install umbragate   # macOS / Linux
-# or: make && ./umbragate                             # build from source (Go + Node.js required)
-```
+1. Open **http://localhost:8787** — the built-in web console.
+2. Add your providers (OpenAI, Anthropic, DeepSeek, …) with their API keys.
+3. Create a proxy link, stack providers in priority order, set fallback rules.
+4. Copy the link's URL and paste it into your favorite AI client — OpenCode, Cursor, ChatGPT client, or any OpenAI-compatible tool.
+
+That's it. Your requests are now automatically routed with failover, logged, and analyzed.
 
 All data lives under `~/.umbragate/` — config, DB, everything. Migrate or reset by moving that directory.
 
