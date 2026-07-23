@@ -27,16 +27,34 @@ func AdapterFor(typeName string) (Adapter, bool) {
 	return a, ok
 }
 
+// AdapterForProtocol selects the official SDK client from the endpoint style.
+// Provider type is metadata; the wire protocol is authoritative.
+func AdapterForProtocol(typeName, protocol string) (Adapter, bool) {
+	switch protocol {
+	case models.ProtocolAnthropic:
+		return AdapterFor("anthropic")
+	case models.ProtocolOpenAI:
+		switch typeName {
+		case "openai", "deepseek", "qwen", "custom", "opencode", "gemini", "anthropic":
+			return AdapterFor("openai")
+		default:
+			// Preserve explicitly registered extension adapters.
+			return AdapterFor(typeName)
+		}
+	}
+	return AdapterFor(typeName)
+}
+
 func initBuiltins() {
 	regMu.Lock()
 	defer regMu.Unlock()
-	registry["openai"] = newOpenAI("openai", "/v1/chat/completions")
-	registry["deepseek"] = newOpenAI("deepseek", "/v1/chat/completions")
-	registry["qwen"] = newOpenAI("qwen", "/v1/chat/completions")
-	registry["custom"] = newOpenAI("custom", "/v1/chat/completions")
-	registry["opencode"] = newOpenAI("opencode", "")
+	registry["openai"] = newOpenAI("openai")
+	registry["deepseek"] = newOpenAI("deepseek")
+	registry["qwen"] = newOpenAI("qwen")
+	registry["custom"] = newOpenAI("custom")
+	registry["opencode"] = newOpenAI("opencode")
 	registry["anthropic"] = AnthropicAdapter{}
-	registry["gemini"] = GeminiAdapter{}
+	registry["gemini"] = newOpenAI("gemini")
 }
 
 // FromModel converts a stored provider model into the runtime Provider.

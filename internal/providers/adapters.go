@@ -7,16 +7,22 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
+
+	anthropic "github.com/anthropics/anthropic-sdk-go"
+	anthropicoption "github.com/anthropics/anthropic-sdk-go/option"
+	openai "github.com/openai/openai-go/v3"
+	openaioption "github.com/openai/openai-go/v3/option"
 )
 
 var httpClient = &http.Client{Timeout: 120 * time.Second}
 
-func doRequest(ctx context.Context, method, url string, headers map[string]string, body []byte) ([]byte, int, error) {
+func doRequest(ctx context.Context, method, url string, headers map[string]string, body []byte) ([]byte, int, map[string]string, error) {
 	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(body))
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
@@ -26,11 +32,15 @@ func doRequest(ctx context.Context, method, url string, headers map[string]strin
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 	defer resp.Body.Close()
 	b, err := io.ReadAll(resp.Body)
-	return b, resp.StatusCode, err
+	responseHeaders := make(map[string]string, len(resp.Header))
+	for key, values := range resp.Header {
+		responseHeaders[key] = strings.Join(values, ", ")
+	}
+	return b, resp.StatusCode, responseHeaders, err
 }
 
 // setOpenAIModel overrides the model in the raw OpenAI request body.
@@ -48,16 +58,14 @@ func setOpenAIModel(raw []byte, model string) ([]byte, error) {
 // OpenAI Chat Completions protocol).
 type OpenAIAdapter struct {
 	typeName string
-	// pathSuffix is appended to base url, e.g. "/v1/chat/completions".
-	pathSuffix string
 }
 
-func newOpenAI(name, suffix string) OpenAIAdapter { return OpenAIAdapter{name, suffix} }
+func newOpenAI(name string) OpenAIAdapter { return OpenAIAdapter{typeName: name} }
 
 func (a OpenAIAdapter) Type() string { return a.typeName }
 
-func (a OpenAIAdapter) Forward(ctx context.Context, p Provider, req OpenAIReq, modelOverride string) Result {
-	url := strings.TrimRight(p.BaseURL, "/") + a.pathSuffix
+func (a OpenAIAdapter) Forward(ctx context.Context, p Provider, req OpenAIReq, modelOverride, _ string) Result {
+	requestURL := p.BaseURL
 	body := req.Raw
 	if modelOverride != "" {
 		b, err := setOpenAIModel(body, modelOverride)
@@ -67,12 +75,25 @@ func (a OpenAIAdapter) Forward(ctx context.Context, p Provider, req OpenAIReq, m
 	} else if req.Model != "" {
 		// ensure model set
 	}
-	headers := map[string]string{"Authorization": "Bearer " + p.APIKey}
-	b, code, err := doRequest(ctx, http.MethodPost, url, headers, body)
+	baseURL, path, err := splitSDKTarget(requestURL)
 	if err != nil {
-		return Result{Err: fmt.Errorf("openai upstream: %w", err)}
+		return Result{Err: fmt.Errorf("openai upstream: %w", err), RequestURL: requestURL, RequestBody: body}
 	}
-	return Result{Body: b, StatusCode: code}
+	var rawResponse *http.Response
+	var responseBody []byte
+	captured := requestSnapshot{URL: requestURL, Body: body}
+	client := openai.NewClient(
+		openaioption.WithAPIKey(p.APIKey),
+		openaioption.WithBaseURL(baseURL),
+		openaioption.WithHTTPClient(httpClient),
+		openaioption.WithMaxRetries(0),
+		openaioption.WithMiddleware(func(request *http.Request, next openaioption.MiddlewareNext) (*http.Response, error) {
+			captured = snapshotRequest(request, body)
+			return next(request)
+		}),
+	)
+	err = client.Post(ctx, path, body, &responseBody, openaioption.WithResponseInto(&rawResponse))
+	return sdkResult("openai", captured, responseBody, rawResponse, err)
 }
 
 // Anthropic expects /v1/messages with x-api-key and anthropic-version header.
@@ -80,50 +101,96 @@ type AnthropicAdapter struct{}
 
 func (AnthropicAdapter) Type() string { return "anthropic" }
 
-func (AnthropicAdapter) Forward(ctx context.Context, p Provider, req OpenAIReq, modelOverride string) Result {
-	model := req.Model
+func (AnthropicAdapter) Forward(ctx context.Context, p Provider, req OpenAIReq, modelOverride, _ string) Result {
+	body := req.Raw
 	if modelOverride != "" {
-		model = modelOverride
-	}
-	var sysParts []string
-	var msgs []map[string]any
-	for _, m := range req.Messages {
-		switch m.Role {
-		case "system":
-			if s, ok := m.Content.(string); ok {
-				sysParts = append(sysParts, s)
-			} else if b, err := json.Marshal(m.Content); err == nil {
-				sysParts = append(sysParts, string(b))
-			}
-		default:
-			msgs = append(msgs, map[string]any{"role": m.Role, "content": m.Content})
+		if changed, err := setOpenAIModel(body, modelOverride); err == nil {
+			body = changed
 		}
 	}
-	bodyMap := map[string]any{
-		"model":      model,
-		"messages":   msgs,
-		"max_tokens": 4096,
-	}
-	if len(sysParts) > 0 {
-		bodyMap["system"] = strings.Join(sysParts, "\n")
-	}
-	body, _ := json.Marshal(bodyMap)
-	headers := map[string]string{
-		"x-api-key":         p.APIKey,
-		"anthropic-version": strFromExtra(p.Extra, "anthropic_version", "2023-06-01"),
-	}
-	url := strings.TrimRight(p.BaseURL, "/") + "/v1/messages"
-	b, code, err := doRequest(ctx, http.MethodPost, url, headers, body)
+	requestURL := p.BaseURL
+	baseURL, path, err := splitSDKTarget(requestURL)
 	if err != nil {
-		return Result{Err: fmt.Errorf("anthropic upstream: %w", err)}
+		return Result{Err: fmt.Errorf("anthropic upstream: %w", err), RequestURL: requestURL, RequestBody: body}
 	}
-	// convert anthropic response back to OpenAI format
-	if code >= 200 && code < 300 {
-		if conv, cerr := anthropicToOpenAI(b); cerr == nil {
-			b = conv
+	var rawResponse *http.Response
+	var responseBody []byte
+	captured := requestSnapshot{URL: requestURL, Body: body}
+	client := anthropic.NewClient(
+		anthropicoption.WithAPIKey(p.APIKey),
+		anthropicoption.WithBaseURL(baseURL),
+		anthropicoption.WithHTTPClient(httpClient),
+		anthropicoption.WithMaxRetries(0),
+		anthropicoption.WithHeader("anthropic-version", strFromExtra(p.Extra, "anthropic_version", "2023-06-01")),
+		anthropicoption.WithMiddleware(func(request *http.Request, next anthropicoption.MiddlewareNext) (*http.Response, error) {
+			captured = snapshotRequest(request, body)
+			return next(request)
+		}),
+	)
+	err = client.Post(ctx, path, body, &responseBody, anthropicoption.WithResponseInto(&rawResponse))
+	return sdkResult("anthropic", captured, responseBody, rawResponse, err)
+}
+
+type requestSnapshot struct {
+	URL     string
+	Headers map[string]string
+	Body    []byte
+}
+
+func splitSDKTarget(rawURL string) (string, string, error) {
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		if err == nil {
+			err = fmt.Errorf("invalid URL %q", rawURL)
+		}
+		return "", "", err
+	}
+	baseURL := parsed.Scheme + "://" + parsed.Host + "/"
+	path := strings.TrimPrefix(parsed.EscapedPath(), "/")
+	if parsed.RawQuery != "" {
+		path += "?" + parsed.RawQuery
+	}
+	return baseURL, path, nil
+}
+
+func snapshotRequest(request *http.Request, fallbackBody []byte) requestSnapshot {
+	headers := make(map[string]string, len(request.Header))
+	for key, values := range request.Header {
+		headers[key] = strings.Join(values, ", ")
+	}
+	body := fallbackBody
+	if request.GetBody != nil {
+		if reader, err := request.GetBody(); err == nil {
+			if content, readErr := io.ReadAll(reader); readErr == nil {
+				body = content
+			}
+			_ = reader.Close()
 		}
 	}
-	return Result{Body: b, StatusCode: code}
+	return requestSnapshot{URL: request.URL.String(), Headers: headers, Body: body}
+}
+
+func sdkResult(providerName string, request requestSnapshot, body []byte, response *http.Response, requestErr error) Result {
+	result := Result{
+		Body: body, RequestURL: request.URL, RequestHeaders: request.Headers, RequestBody: request.Body,
+	}
+	if response != nil {
+		result.StatusCode = response.StatusCode
+		result.ResponseHeaders = make(map[string]string, len(response.Header))
+		for key, values := range response.Header {
+			result.ResponseHeaders[key] = strings.Join(values, ", ")
+		}
+		if len(result.Body) == 0 && response.Body != nil {
+			if contents, err := io.ReadAll(response.Body); err == nil {
+				result.Body = contents
+			}
+			_ = response.Body.Close()
+		}
+	}
+	if requestErr != nil && result.StatusCode == 0 {
+		result.Err = fmt.Errorf("%s upstream: %w", providerName, requestErr)
+	}
+	return result
 }
 
 func strFromExtra(m map[string]any, key, def string) string {
@@ -143,7 +210,7 @@ type GeminiAdapter struct{}
 
 func (GeminiAdapter) Type() string { return "gemini" }
 
-func (GeminiAdapter) Forward(ctx context.Context, p Provider, req OpenAIReq, modelOverride string) Result {
+func (GeminiAdapter) Forward(ctx context.Context, p Provider, req OpenAIReq, modelOverride, _ string) Result {
 	model := req.Model
 	if modelOverride != "" {
 		model = modelOverride
@@ -163,23 +230,29 @@ func (GeminiAdapter) Forward(ctx context.Context, p Provider, req OpenAIReq, mod
 		}
 	}
 	bodyMap := map[string]any{"contents": contents}
+	if req.MaxTokens > 0 {
+		bodyMap["generationConfig"] = map[string]any{"maxOutputTokens": req.MaxTokens}
+	}
 	if len(sysParts) > 0 {
 		bodyMap["systemInstruction"] = map[string]any{"parts": []map[string]any{{"text": strings.Join(sysParts, "\n")}}}
 	}
 	body, _ := json.Marshal(bodyMap)
-	url := fmt.Sprintf("%s/v1beta/models/%s:generateContent?key=%s",
-		strings.TrimRight(p.BaseURL, "/"), model, p.APIKey)
+	baseURL := strings.TrimRight(p.BaseURL, "/")
+	if !strings.HasSuffix(baseURL, "/v1beta") {
+		baseURL += "/v1beta"
+	}
+	url := fmt.Sprintf("%s/models/%s:generateContent?key=%s", baseURL, model, p.APIKey)
 	headers := map[string]string{"Content-Type": "application/json"}
-	b, code, err := doRequest(ctx, http.MethodPost, url, headers, body)
+	b, code, responseHeaders, err := doRequest(ctx, http.MethodPost, url, headers, body)
 	if err != nil {
-		return Result{Err: fmt.Errorf("gemini upstream: %w", err)}
+		return Result{Err: fmt.Errorf("gemini upstream: %w", err), RequestURL: url, RequestHeaders: headers, RequestBody: body, ResponseHeaders: responseHeaders}
 	}
 	if code >= 200 && code < 300 {
 		if conv, cerr := geminiToOpenAI(b); cerr == nil {
 			b = conv
 		}
 	}
-	return Result{Body: b, StatusCode: code}
+	return Result{Body: b, StatusCode: code, RequestURL: url, RequestHeaders: headers, RequestBody: body, ResponseHeaders: responseHeaders}
 }
 
 func textParts(content any) []map[string]any {

@@ -19,7 +19,7 @@ umbragate
 - **单二进制，零依赖。** API 网关、管理后台、SQLite 全部内嵌。下载即跑。
 - **链路式故障切换。** 按优先级堆叠多个 Provider，每个可配置重试次数、状态码规则、错误匹配、超时策略和降级模型。一个挂了，下一个顶上。
 - **按属性统计。** 给链接和请求打上 `键:值` 属性标签，统计按 链接 × Provider × 属性 × 小时 自动聚合 —— 成本分摊、用量追踪一步到位。
-- **Provider 来者不拒。** 原生支持 OpenAI、Anthropic、Gemini、DeepSeek、Qwen。任意 OpenAI 兼容 API 即可作为自定义 Provider。热加载，无需重启。
+- **两类原生协议风格。** Link 明确区分 OpenAI Style 与 Anthropic Style，二者不能混编。OpenAI Chat Completions、Responses 与 Anthropic Messages 均通过厂商官方 Go SDK 发出；兼容 Provider 可声明多个端点格式和 Base URL。
 - **自带 Web 控制台。** React SPA 随二进制一同打包。在浏览器里管理链接、配置链路、查看统计 —— 不用敲 CLI，不用写配置（当然 config.yaml 需要时也在）。
 
 ## 快速上手
@@ -35,6 +35,8 @@ umbragate
 2. 添加你的 Provider（OpenAI、Anthropic、DeepSeek 等），填入 API Key。
 3. 创建代理链接，按优先级堆叠 Provider，配置故障切换规则。
 4. 复制链接 URL，填入你喜欢的 AI 客户端 —— OpenCode、Cursor、ChatGPT 客户端，或任何 OpenAI 兼容工具。
+
+OpenAI Style Link 提供 `/v1/chat/completions` 与 `/v1/responses`；Anthropic Style Link 提供 `/v1/messages`。
 
 搞定。请求自动带故障切换、日志记录和统计分析。
 

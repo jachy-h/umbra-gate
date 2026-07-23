@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
+	"net/url"
 	"strings"
 	"time"
 
@@ -24,30 +24,61 @@ type Forwarder struct {
 
 // Handle implements the OpenAI Chat Completions compatible proxy for a link.
 func (f *Forwarder) Handle(w http.ResponseWriter, r *http.Request, link models.ProxyLink) {
+	f.HandleRequest(w, r, link, models.ProtocolOpenAI, models.FormatChatCompletions)
+}
+
+// HandleRequest forwards one API format within the style fixed by the first
+// chain node. API formats (Chat Completions, Responses, Messages) are endpoint
+// capabilities, not link protocols.
+func (f *Forwarder) HandleRequest(w http.ResponseWriter, r *http.Request, link models.ProxyLink, requestProtocol, requestFormat string) {
+	linkProtocol := link.Protocol
+	if linkProtocol == "" && len(link.Chain) > 0 {
+		linkProtocol = link.Chain[0].Protocol
+	}
+	if linkProtocol != "" && linkProtocol != requestProtocol {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("link protocol is %s, request protocol is %s", linkProtocol, requestProtocol))
+		return
+	}
 	body, _ := io.ReadAll(r.Body)
 	origModel := extractModel(body)
 	attributes := parseAttrMerge(link, r.Header)
+	requestURL := inboundRequestURL(r)
+	requestHeaders := redactHTTPHeaders(r.Header)
 
 	var lastErr error
 	var lastStatus int
+	var lastBody []byte
 	chain := link.Chain
 
 	for i, entry := range chain {
+		if entry.Protocol != "" && linkProtocol != "" && entry.Protocol != linkProtocol {
+			lastErr = fmt.Errorf("chain entry %d protocol %s does not match link protocol %s", i, entry.Protocol, linkProtocol)
+			continue
+		}
 		provider, err := f.DB.GetProvider(entry.ProviderID)
 		if err != nil || !provider.Enabled {
 			lastErr = fmt.Errorf("provider %s unavailable", entry.ProviderID)
 			continue
 		}
-		adapter, ok := providers.AdapterFor(provider.Type)
-		if !ok {
-			lastErr = fmt.Errorf("no adapter for type %s", provider.Type)
-			continue
-		}
-
 		// Use chain-entry API key override if set, otherwise fall back to global provider key.
 		if entry.ApiKey != "" {
 			provider.APIKey = entry.ApiKey
 		}
+		protocol := entry.Protocol
+		if protocol == "" {
+			protocol = linkProtocol
+		}
+		adapter, ok := providers.AdapterForProtocol(provider.Type, protocol)
+		if !ok {
+			lastErr = fmt.Errorf("no adapter for type %s and protocol %s", provider.Type, protocol)
+			continue
+		}
+		endpoint, ok := endpointForRequest(provider, protocol, requestFormat)
+		if !ok {
+			lastErr = fmt.Errorf("provider %s does not support %s responses over %s style", provider.Name, requestFormat, protocol)
+			continue
+		}
+		provider.BaseURL = endpointURL(endpoint)
 
 		attempts := entry.RetryCount + 1
 		for attempt := 0; attempt < attempts; attempt++ {
@@ -57,80 +88,485 @@ func (f *Forwarder) Handle(w http.ResponseWriter, r *http.Request, link models.P
 			if (attempt > 0 || i > 0) && entry.FallbackModel != "" {
 				modelOverride = entry.FallbackModel
 			}
-			req := providers.OpenAIReq{Raw: body, Model: modelOverride}
+			upstreamBody, prepareErr := prepareRequestBody(body, requestFormat, endpoint.RequestFormat)
+			if prepareErr != nil {
+				lastErr = fmt.Errorf("provider %s request adaptation failed: %w", provider.Name, prepareErr)
+				break
+			}
+			req := openAIRequest(upstreamBody, modelOverride)
 			start := time.Now()
-			res := adapter.Forward(r.Context(), providers.FromModel(provider), req, modelOverride)
+			res := adapter.Forward(r.Context(), providers.FromModel(provider), req, modelOverride, endpoint.RequestFormat)
 			latency := time.Since(start).Milliseconds()
 			usedModel := modelOverride
 
-			success := res.Err == nil && res.StatusCode >= 200 && res.StatusCode < 300
+			validationErr := validateResult(res, endpoint.ResponseFormat)
+			success := validationErr == nil
 			f.Stats.Record(models.RequestLog{
 				LinkID: link.ID, Path: link.Path, ProviderID: provider.ID,
 				ProviderName: provider.Name, Model: usedModel,
 				StatusCode: res.StatusCode, LatencyMS: latency,
 				Success: success, Attributes: attributes,
-				ErrorMessage: errStr(res.Err), CreatedAt: time.Now(),
+				ErrorMessage: errStr(validationErr),
+				RequestURL:   requestURL, RequestHeaders: requestHeaders, RequestBody: logBody(body),
+				UpstreamURL: redactURL(res.RequestURL), UpstreamHeaders: redactStringHeaders(res.RequestHeaders), UpstreamBody: logBody(res.RequestBody),
+				ResponseHeaders: redactStringHeaders(res.ResponseHeaders), ResponseBody: logBody(res.Body), CreatedAt: time.Now(),
 			})
 
 			if success {
 				writeJSON(w, res.StatusCode, res.Body)
 				return
 			}
-			lastErr = res.Err
+			lastErr = validationErr
 			lastStatus = res.StatusCode
+			lastBody = res.Body
 
-			// Escalate when this attempt should fall back:
-			//   - transport error
-			//   - status in OnStatusCodes
-			//   - client/configurable error message matches OnErrors / timeout
-			//   - 5xx by default (rules empty)
-			if !shouldFallback(entry.Rules, res) {
-				// Non-fallbackable failure (e.g. 4xx). Surface to client.
-				if res.Body != nil {
-					writeJSON(w, res.StatusCode, res.Body)
-				} else {
-					writeError(w, res.StatusCode, lastErr.Error())
-				}
-				return
-			}
-			// otherwise: try next attempt or next provider
+			// Every failed or malformed upstream response is handled inside the
+			// gateway. Continue to the next attempt/provider instead of asking the
+			// Agent to retry the request itself.
 		}
 	}
 
 	if lastStatus > 0 || lastErr != nil {
+		if lastBody != nil && (lastStatus < 200 || lastStatus >= 300) {
+			writeJSON(w, pickStatus(lastStatus), lastBody)
+			return
+		}
 		msg := "all providers failed"
 		if lastErr != nil {
 			msg = lastErr.Error()
 		}
-		writeError(w, pickStatus(lastStatus), msg)
+		status := pickStatus(lastStatus)
+		if status >= 200 && status < 300 {
+			status = http.StatusBadGateway
+		}
+		writeError(w, status, msg)
 		return
 	}
 	writeError(w, http.StatusServiceUnavailable, "no available providers")
 }
 
-func shouldFallback(r models.Rules, res providers.Result) bool {
+func endpointForRequest(provider models.Provider, protocol, responseFormat string) (models.ProviderEndpoint, bool) {
+	for _, endpoint := range provider.Endpoints {
+		if endpoint.Protocol == protocol && endpoint.ResponseFormat == responseFormat && endpoint.BaseURL != "" {
+			return endpoint, true
+		}
+	}
+	return models.ProviderEndpoint{}, false
+}
+
+func firstEndpointForProtocol(provider models.Provider, protocol string) (models.ProviderEndpoint, bool) {
+	for _, endpoint := range provider.Endpoints {
+		if endpoint.Protocol == protocol && endpoint.BaseURL != "" {
+			return endpoint, true
+		}
+	}
+	return models.ProviderEndpoint{}, false
+}
+
+func endpointURL(endpoint models.ProviderEndpoint) string {
+	baseURL := strings.TrimRight(endpoint.BaseURL, "/")
+	parsed, _ := url.Parse(baseURL)
+	hasPathPrefix := parsed != nil && strings.Trim(parsed.Path, "/") != ""
+	switch endpoint.RequestFormat {
+	case models.FormatChatCompletions:
+		// Some compatible providers intentionally accept Chat payloads at a
+		// /responses URL. Treat an explicit operation URL as authoritative.
+		if strings.HasSuffix(baseURL, "/chat/completions") || strings.HasSuffix(baseURL, "/responses") {
+			return baseURL
+		}
+		if strings.HasSuffix(baseURL, "/v1") || hasPathPrefix {
+			return baseURL + "/chat/completions"
+		}
+		return baseURL + "/v1/chat/completions"
+	case models.FormatResponses:
+		if strings.HasSuffix(baseURL, "/responses") {
+			return baseURL
+		}
+		if strings.HasSuffix(baseURL, "/v1") || hasPathPrefix {
+			return baseURL + "/responses"
+		}
+		return baseURL + "/v1/responses"
+	case models.FormatMessages:
+		if strings.HasSuffix(baseURL, "/messages") {
+			return baseURL
+		}
+		if strings.HasSuffix(baseURL, "/v1") {
+			return baseURL + "/messages"
+		}
+		return baseURL + "/v1/messages"
+	default:
+		return baseURL
+	}
+}
+
+// ValidateChain probes each configured node once. The returned status is
+// persisted with the link so the console can make failed nodes visually quiet.
+func (f *Forwarder) ValidateChain(ctx context.Context, link models.ProxyLink) models.ProxyLink {
+	for i := range link.Chain {
+		entry := &link.Chain[i]
+		now := time.Now()
+		startedAt := now
+		entry.ValidatedAt = now
+		ok := false
+		entry.ValidationOK = &ok
+		entry.ValidationError = ""
+		providerName := entry.ProviderID
+		model := entry.FallbackModel
+		var requestBody, responseBody []byte
+		var upstreamURL string
+		var upstreamHeaders models.Map
+		var upstreamBody []byte
+		var responseHeaders models.Map
+		recordValidation := func(statusCode int) {
+			if f.Stats == nil {
+				return
+			}
+			attributes := models.Map{"_request_type": "link_validation", "_chain_position": i}
+			for key, value := range link.Attributes {
+				attributes[key] = value
+			}
+			f.Stats.Record(models.RequestLog{
+				LinkID: link.ID, Path: link.Path, ProviderID: entry.ProviderID,
+				ProviderName: providerName, Model: model,
+				StatusCode: statusCode, LatencyMS: time.Since(startedAt).Milliseconds(),
+				Success: *entry.ValidationOK, ErrorMessage: entry.ValidationError,
+				RequestBody: logBody(requestBody),
+				UpstreamURL: upstreamURL, UpstreamHeaders: upstreamHeaders, UpstreamBody: logBody(upstreamBody),
+				ResponseHeaders: responseHeaders, ResponseBody: logBody(responseBody),
+				Attributes: attributes, CreatedAt: time.Now(),
+			})
+		}
+		if entry.Protocol != "" && link.Protocol != "" && entry.Protocol != link.Protocol {
+			entry.ValidationError = fmt.Sprintf("protocol mismatch: node uses %s, link requires %s", entry.Protocol, link.Protocol)
+			recordValidation(0)
+			continue
+		}
+
+		provider, err := f.DB.GetProvider(entry.ProviderID)
+		if err != nil || !provider.Enabled {
+			entry.ValidationError = "provider unavailable"
+			recordValidation(0)
+			continue
+		}
+		providerName = provider.Name
+		if entry.ApiKey != "" {
+			provider.APIKey = entry.ApiKey
+		}
+		protocol := entry.Protocol
+		if protocol == "" {
+			protocol = link.Protocol
+		}
+		adapter, exists := providers.AdapterForProtocol(provider.Type, protocol)
+		if !exists {
+			entry.ValidationError = "provider adapter unavailable"
+			recordValidation(0)
+			continue
+		}
+		endpoint, exists := firstEndpointForProtocol(provider, protocol)
+		if !exists {
+			entry.ValidationError = fmt.Sprintf("provider does not support protocol %s", protocol)
+			recordValidation(0)
+			continue
+		}
+		provider.BaseURL = endpointURL(endpoint)
+		if model == "" && len(provider.Models) > 0 {
+			model = provider.Models[0]
+		}
+		if model == "" {
+			entry.ValidationError = "no model configured for validation"
+			recordValidation(0)
+			continue
+		}
+		requestPayload := map[string]any{"model": model}
+		switch endpoint.RequestFormat {
+		case models.FormatResponses:
+			requestPayload["input"] = "Reply with OK."
+			requestPayload["max_output_tokens"] = 100
+		case models.FormatMessages, models.FormatChatCompletions:
+			requestPayload["messages"] = []map[string]string{{"role": "user", "content": "Reply with OK."}}
+			requestPayload["max_tokens"] = 100
+		}
+		body, _ := json.Marshal(requestPayload)
+		requestBody = body
+		probeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		res := adapter.Forward(probeCtx, providers.FromModel(provider), openAIRequest(body, model), model, endpoint.RequestFormat)
+		responseBody = res.Body
+		responseHeaders = redactStringHeaders(res.ResponseHeaders)
+		upstreamURL = redactURL(res.RequestURL)
+		upstreamHeaders = redactStringHeaders(res.RequestHeaders)
+		upstreamBody = res.RequestBody
+		cancel()
+		if err := validateResult(res, endpoint.ResponseFormat); err != nil {
+			entry.ValidationError = err.Error()
+			recordValidation(res.StatusCode)
+			continue
+		}
+		ok = true
+		entry.ValidationOK = &ok
+		recordValidation(res.StatusCode)
+	}
+	return link
+}
+
+const maxLoggedBodyBytes = 1024 * 1024
+
+func logBody(body []byte) string {
+	if len(body) <= maxLoggedBodyBytes {
+		return string(body)
+	}
+	return string(body[:maxLoggedBodyBytes]) + "\n...[truncated]"
+}
+
+func inboundRequestURL(r *http.Request) string {
+	if r == nil || r.URL == nil {
+		return ""
+	}
+	scheme := r.URL.Scheme
+	if scheme == "" {
+		scheme = r.Header.Get("X-Forwarded-Proto")
+	}
+	if scheme == "" {
+		if r.TLS != nil {
+			scheme = "https"
+		} else {
+			scheme = "http"
+		}
+	}
+	if r.Host == "" {
+		return redactURL(r.URL.String())
+	}
+	return redactURL(scheme + "://" + r.Host + r.URL.RequestURI())
+}
+
+func redactHTTPHeaders(headers http.Header) models.Map {
+	out := models.Map{}
+	for key, values := range headers {
+		if sensitiveHeader(key) {
+			out[key] = "[REDACTED]"
+		} else {
+			out[key] = strings.Join(values, ", ")
+		}
+	}
+	return out
+}
+
+func redactStringHeaders(headers map[string]string) models.Map {
+	out := models.Map{}
+	for key, value := range headers {
+		if sensitiveHeader(key) {
+			out[key] = "[REDACTED]"
+		} else {
+			out[key] = value
+		}
+	}
+	return out
+}
+
+func sensitiveHeader(key string) bool {
+	switch strings.ToLower(key) {
+	case "authorization", "proxy-authorization", "x-api-key", "api-key", "x-admin-token", "cookie", "set-cookie":
+		return true
+	default:
+		return false
+	}
+}
+
+func redactURL(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	query := parsed.Query()
+	for key := range query {
+		switch strings.ToLower(key) {
+		case "key", "api_key", "token", "access_token":
+			query.Set(key, "[REDACTED]")
+		}
+	}
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
+}
+
+func openAIRequest(body []byte, model string) providers.OpenAIReq {
+	req := providers.OpenAIReq{Raw: body, Model: model}
+	_ = json.Unmarshal(body, &req)
+	req.Raw = body
+	if model != "" {
+		req.Model = model
+	}
+	return req
+}
+
+func prepareRequestBody(body []byte, inboundFormat, upstreamFormat string) ([]byte, error) {
+	if inboundFormat == upstreamFormat {
+		return body, nil
+	}
+	if inboundFormat != models.FormatResponses || upstreamFormat != models.FormatChatCompletions {
+		return nil, fmt.Errorf("unsupported format conversion %s -> %s", inboundFormat, upstreamFormat)
+	}
+	var source map[string]any
+	if err := json.Unmarshal(body, &source); err != nil {
+		return nil, fmt.Errorf("invalid Responses request: %w", err)
+	}
+	target := map[string]any{}
+	for _, key := range []string{"model", "stream", "temperature", "top_p", "metadata"} {
+		if value, ok := source[key]; ok {
+			target[key] = value
+		}
+	}
+	if value, ok := source["max_output_tokens"]; ok {
+		target["max_tokens"] = value
+	}
+	messages := make([]map[string]any, 0)
+	if instructions, ok := source["instructions"].(string); ok && instructions != "" {
+		messages = append(messages, map[string]any{"role": "system", "content": instructions})
+	}
+	switch input := source["input"].(type) {
+	case string:
+		messages = append(messages, map[string]any{"role": "user", "content": input})
+	case []any:
+		for _, item := range input {
+			message, ok := item.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("unsupported Responses input item")
+			}
+			role, _ := message["role"].(string)
+			if role == "" {
+				role = "user"
+			}
+			content, err := responsesInputContentToChat(message["content"])
+			if err != nil {
+				return nil, err
+			}
+			messages = append(messages, map[string]any{"role": role, "content": content})
+		}
+	default:
+		return nil, fmt.Errorf("Responses input must be a string or message array")
+	}
+	target["messages"] = messages
+	if tools, exists := source["tools"]; exists {
+		converted, err := responsesToolsToChat(tools)
+		if err != nil {
+			return nil, err
+		}
+		target["tools"] = converted
+	}
+	return json.Marshal(target)
+}
+
+func responsesInputContentToChat(value any) (any, error) {
+	if text, ok := value.(string); ok {
+		return text, nil
+	}
+	parts, ok := value.([]any)
+	if !ok {
+		return nil, fmt.Errorf("unsupported Responses message content")
+	}
+	chatParts := make([]map[string]any, 0, len(parts))
+	for _, rawPart := range parts {
+		part, ok := rawPart.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("unsupported Responses content part")
+		}
+		switch partType, _ := part["type"].(string); partType {
+		case "input_text":
+			chatParts = append(chatParts, map[string]any{"type": "text", "text": part["text"]})
+		case "input_image":
+			chatParts = append(chatParts, map[string]any{"type": "image_url", "image_url": map[string]any{"url": part["image_url"]}})
+		default:
+			return nil, fmt.Errorf("unsupported Responses content type %q", partType)
+		}
+	}
+	return chatParts, nil
+}
+
+func responsesToolsToChat(value any) ([]map[string]any, error) {
+	tools, ok := value.([]any)
+	if !ok {
+		return nil, fmt.Errorf("Responses tools must be an array")
+	}
+	converted := make([]map[string]any, 0, len(tools))
+	for _, rawTool := range tools {
+		tool, ok := rawTool.(map[string]any)
+		if !ok || tool["type"] != "function" {
+			return nil, fmt.Errorf("only function tools can be adapted from Responses to Chat Completions")
+		}
+		function := map[string]any{"name": tool["name"]}
+		if description, exists := tool["description"]; exists {
+			function["description"] = description
+		}
+		if parameters, exists := tool["parameters"]; exists {
+			function["parameters"] = parameters
+		}
+		converted = append(converted, map[string]any{"type": "function", "function": function})
+	}
+	return converted, nil
+}
+
+func validateResult(res providers.Result, responseFormat string) error {
 	if res.Err != nil {
-		msg := res.Err.Error()
-		for _, e := range r.OnErrors {
-			if strings.Contains(msg, e) {
-				return true
+		return res.Err
+	}
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		return fmt.Errorf("upstream returned HTTP %d", res.StatusCode)
+	}
+	trimmed := bytes.TrimSpace(res.Body)
+	if bytes.HasPrefix(trimmed, []byte("data:")) {
+		for _, line := range bytes.Split(trimmed, []byte("\n")) {
+			line = bytes.TrimSpace(line)
+			if !bytes.HasPrefix(line, []byte("data:")) {
+				continue
+			}
+			data := bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
+			if bytes.Equal(data, []byte("[DONE]")) {
+				continue
+			}
+			var event map[string]any
+			if json.Unmarshal(data, &event) == nil {
+				switch responseFormat {
+				case models.FormatResponses:
+					if eventType, _ := event["type"].(string); strings.HasPrefix(eventType, "response.") && !strings.Contains(eventType, "error") {
+						return nil
+					}
+				case models.FormatMessages:
+					if eventType, _ := event["type"].(string); eventType == "message_start" || eventType == "content_block_delta" || eventType == "message_stop" {
+						return nil
+					}
+				default:
+					if choices, ok := event["choices"].([]any); ok && len(choices) > 0 {
+						return nil
+					}
+				}
 			}
 		}
-		if r.OnTimeout && strings.Contains(msg, "timeout") {
-			return true
+		return fmt.Errorf("upstream stream has no valid choices")
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(res.Body, &payload); err != nil {
+		return fmt.Errorf("invalid upstream JSON: %w", err)
+	}
+	if upstreamErr, exists := payload["error"]; exists && upstreamErr != nil {
+		return fmt.Errorf("upstream response contains an error")
+	}
+	switch responseFormat {
+	case models.FormatResponses:
+		output, ok := payload["output"].([]any)
+		if !ok || len(output) == 0 {
+			return fmt.Errorf("upstream Responses API response has no output")
 		}
-		// transport errors always escalate
-		return res.StatusCode == 0
-	}
-	for _, c := range r.OnStatusCodes {
-		if c == res.StatusCode {
-			return true
+		return nil
+	case models.FormatMessages:
+		content, ok := payload["content"].([]any)
+		if !ok || len(content) == 0 {
+			return fmt.Errorf("upstream Anthropic Messages response has no content")
 		}
+		return nil
 	}
-	if len(r.OnStatusCodes) == 0 && res.StatusCode >= 500 {
-		return true
+	choices, ok := payload["choices"].([]any)
+	if !ok || len(choices) == 0 {
+		return fmt.Errorf("upstream Chat Completions response has no choices")
 	}
-	return false
+	return nil
 }
 
 func extractModel(body []byte) string {
@@ -159,7 +595,11 @@ func pickStatus(s int) int {
 }
 
 func writeJSON(w http.ResponseWriter, status int, body []byte) {
-	w.Header().Set("Content-Type", "application/json")
+	if bytes.HasPrefix(bytes.TrimSpace(body), []byte("data:")) {
+		w.Header().Set("Content-Type", "text/event-stream")
+	} else {
+		w.Header().Set("Content-Type", "application/json")
+	}
 	if status == 0 {
 		status = http.StatusOK
 	}
@@ -196,7 +636,3 @@ func parseAttrMerge(link models.ProxyLink, header http.Header) models.Map {
 	}
 	return merged
 }
-
-var _ = bytes.NewReader
-var _ = context.TODO
-var _ = strconv.Itoa

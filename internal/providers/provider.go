@@ -5,15 +5,16 @@ import (
 	"errors"
 )
 
-// OpenAIReq is a minimal OpenAI Chat Completions request representation used
-// internally for conversion. We keep most fields as raw JSON to preserve
-// unknown fields while still allowing conversions for Anthropic/Gemini.
+// OpenAIReq carries the raw provider-style payload plus the small set of fields
+// needed for model fallback and legacy adapters. Raw is authoritative so the
+// official SDK clients preserve unknown request fields.
 type OpenAIReq struct {
-	Model    string          `json:"model"`
-	Messages []OpenAIMessage `json:"messages"`
-	Stream   bool            `json:"stream,omitempty"`
-	Extra    map[string]any  `json:"-"`
-	Raw      []byte          `json:"-"`
+	Model     string          `json:"model"`
+	Messages  []OpenAIMessage `json:"messages"`
+	Stream    bool            `json:"stream,omitempty"`
+	MaxTokens int             `json:"max_tokens,omitempty"`
+	Extra     map[string]any  `json:"-"`
+	Raw       []byte          `json:"-"`
 }
 
 type OpenAIMessage struct {
@@ -21,18 +22,23 @@ type OpenAIMessage struct {
 	Content any    `json:"content"`
 }
 
-// Result carries a normalized OpenAI-compatible response body, the upstream
-// status code, and a provider-visible error (if any).
+// Result carries the provider-native response body, upstream status, and the
+// exact HTTP metadata needed by request diagnostics.
 type Result struct {
-	Body       []byte
-	StatusCode int
-	Err        error
+	Body            []byte
+	StatusCode      int
+	Err             error
+	RequestURL      string
+	RequestHeaders  map[string]string
+	RequestBody     []byte
+	ResponseHeaders map[string]string
 }
 
-// Adapter converts an OpenAI Chat Completions request to a provider-native
-// request and invokes the upstream, returning an OpenAI-compatible response.
+// Adapter invokes one provider style. OpenAI and Anthropic adapters keep their
+// native wire contracts; only explicitly asymmetric endpoints are adapted by
+// the forwarding layer.
 type Adapter interface {
-	Forward(ctx context.Context, p Provider, req OpenAIReq, modelOverride string) Result
+	Forward(ctx context.Context, p Provider, req OpenAIReq, modelOverride, protocol string) Result
 	Type() string
 }
 

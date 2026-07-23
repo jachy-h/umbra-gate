@@ -1,11 +1,12 @@
 import { useEffect, useState, useMemo } from 'react'
 import { api } from '../api'
-import type { StatsRow, ProxyLink } from '../types'
+import type { StatsRow, ProxyLink, RequestLog } from '../types'
 import { Card } from '../components/Card'
 import { Badge } from '../components/Badge'
 import { Spinner } from '../components/Spinner'
-import { Input } from '../components/Input'
 import { Button } from '../components/Button'
+import { SearchableSelect } from '../components/SearchableSelect'
+import { RequestDetailsModal } from '../components/RequestDetailsModal'
 
 function fmtNum(n: number) {
   if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M'
@@ -26,24 +27,29 @@ function fmtRate(success: number, total: number) {
 export function StatsDashboard() {
   const [stats, setStats] = useState<StatsRow[]>([])
   const [links, setLinks] = useState<ProxyLink[]>([])
+  const [requests, setRequests] = useState<RequestLog[]>([])
+  const [selectedRequest, setSelectedRequest] = useState<RequestLog | null>(null)
   const [loading, setLoading] = useState(true)
   const [linkFilter, setLinkFilter] = useState('')
-  const [from, setFrom] = useState(() => {
-    const d = new Date()
-    d.setDate(d.getDate() - 7)
-    return d.toISOString().slice(0, 10)
-  })
-  const [to, setTo] = useState(() => new Date().toISOString().slice(0, 10))
+  const [dateRange, setDateRange] = useState('all')
+
+  const rangeStart = () => {
+    const hours: Record<string, number> = { '24h': 24, '7d': 24 * 7, '30d': 24 * 30 }
+    if (!hours[dateRange]) return undefined
+    return new Date(Date.now() - hours[dateRange] * 60 * 60 * 1000).toISOString()
+  }
 
   const fetchData = () => {
     setLoading(true)
     Promise.all([
-      api.getStats({ link_id: linkFilter || undefined, from: from ? `${from}T00:00:00` : undefined, to: to ? `${to}T23:59:59` : undefined }),
+      api.getStats({ link_id: linkFilter || undefined, from: rangeStart() }),
       api.listLinks(),
+      api.listRecentRequests(),
     ])
-      .then(([s, l]) => {
+      .then(([s, l, r]) => {
         setStats(s.stats || [])
         setLinks(l)
+        setRequests(r)
       })
       .catch(console.error)
       .finally(() => setLoading(false))
@@ -91,25 +97,29 @@ export function StatsDashboard() {
 
       {/* Filters */}
       <div className="flex flex-wrap items-end gap-4">
-        <Input
-          label="Link"
-          value={linkFilter}
-          onChange={(e) => setLinkFilter(e.target.value)}
-          placeholder="All links"
-          className="w-48"
-        />
-        <Input
-          label="From"
-          type="date"
-          value={from}
-          onChange={(e) => setFrom(e.target.value)}
-        />
-        <Input
-          label="To"
-          type="date"
-          value={to}
-          onChange={(e) => setTo(e.target.value)}
-        />
+        <div className="w-64 space-y-1.5">
+          <label className="text-[11px] font-medium uppercase tracking-wide text-[var(--color-muted)]">Link</label>
+          <SearchableSelect
+            options={[{ label: 'All links', value: '' }, ...links.map((link) => ({ label: link.name, value: link.id }))]}
+            value={linkFilter}
+            onChange={setLinkFilter}
+            placeholder="Search links..."
+          />
+        </div>
+        <div className="w-48 space-y-1.5">
+          <label className="text-[11px] font-medium uppercase tracking-wide text-[var(--color-muted)]">Date range</label>
+          <SearchableSelect
+            options={[
+              { label: 'Last 24 hours', value: '24h' },
+              { label: 'Last 7 days', value: '7d' },
+              { label: 'Last 30 days', value: '30d' },
+              { label: 'All time', value: 'all' },
+            ]}
+            value={dateRange}
+            onChange={setDateRange}
+            placeholder="Select range..."
+          />
+        </div>
         <Button onClick={fetchData}>Apply</Button>
       </div>
 
@@ -174,43 +184,62 @@ export function StatsDashboard() {
             </div>
           )}
 
-          {/* Hourly detail table */}
-          {stats.length > 0 && (
-            <div className="overflow-hidden rounded-xl border border-[var(--color-hairline)] bg-[var(--color-canvas)]">
-              <div className="px-8 py-5 border-b border-[var(--color-hairline-soft)]">
-                <h3 className="text-lg font-semibold text-[var(--color-ink)]">Hourly Breakdown</h3>
-              </div>
+          <div className="overflow-hidden rounded-xl border border-[var(--color-hairline)] bg-[var(--color-canvas)]">
+            <div className="px-8 py-5 border-b border-[var(--color-hairline-soft)]">
+              <h3 className="text-lg font-semibold text-[var(--color-ink)]">Latest 100 Requests</h3>
+              <p className="mt-1 text-sm text-[var(--color-muted)]">Each provider attempt is recorded, including automatic fallback attempts.</p>
+            </div>
+            {requests.length === 0 ? (
+              <p className="px-8 py-10 text-sm text-[var(--color-muted)]">No requests recorded yet.</p>
+            ) : (
               <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead>
                     <tr className="border-b border-[var(--color-hairline-soft)] text-left text-sm font-medium text-[var(--color-muted)]">
-                      <th className="px-8 py-3 font-medium">Period</th>
-                      <th className="px-8 py-3 font-medium">Link</th>
-                      <th className="px-8 py-3 font-medium">Total</th>
-                      <th className="px-8 py-3 font-medium">Success</th>
-                      <th className="px-8 py-3 font-medium">Failure</th>
-                      <th className="px-8 py-3 font-medium">Avg Latency</th>
+                      <th className="px-6 py-3 font-medium">Time</th>
+                      <th className="px-6 py-3 font-medium">Link</th>
+                      <th className="px-6 py-3 font-medium">Provider</th>
+                      <th className="px-6 py-3 font-medium">Model</th>
+                      <th className="px-6 py-3 font-medium">Status</th>
+                      <th className="px-6 py-3 font-medium">Latency</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {stats.filter((s) => s.AttrKey === '').slice(0, 100).map((s, i) => {
-                      const link = links.find((l) => l.id === s.LinkID)
+                    {requests.map((request) => {
+                      const link = links.find((item) => item.id === request.link_id)
+                      const isLinkTest = request.attributes?._request_type === 'link_validation'
                       return (
-                        <tr key={i} className="border-b border-[var(--color-hairline-soft)] last:border-b-0 hover:bg-[var(--color-surface-soft)] transition-colors">
-                          <td className="px-8 py-3 text-sm whitespace-nowrap">{s.Period}</td>
-                          <td className="px-8 py-3 text-sm font-semibold text-[var(--color-ink)]">{link?.name || s.LinkID}</td>
-                          <td className="px-8 py-3 text-sm">{s.Total}</td>
-                          <td className="px-8 py-3 text-sm text-[var(--color-success)]">{s.Success}</td>
-                          <td className="px-8 py-3 text-sm text-[var(--color-error)]">{s.Failure}</td>
-                          <td className="px-8 py-3 text-sm">{fmtMs(s.Lat, s.Total)}</td>
+                        <tr
+                          key={request.id}
+                          className="border-b border-[var(--color-hairline-soft)] last:border-b-0 cursor-pointer hover:bg-[var(--color-surface-soft)] transition-colors focus:outline-none focus:bg-[var(--color-surface-soft)]"
+                          title="View request and response"
+                          tabIndex={0}
+                          onClick={() => setSelectedRequest(request)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') setSelectedRequest(request)
+                          }}
+                        >
+                          <td className="px-6 py-3 text-xs whitespace-nowrap text-[var(--color-muted)]">{new Date(request.created_at).toLocaleString()}</td>
+                          <td className="px-6 py-3 text-sm font-medium text-[var(--color-ink)]">{link?.name || request.path}</td>
+                          <td className="px-6 py-3 text-sm">
+                            <span className="flex items-center gap-2">
+                              {request.provider_name}
+                              {isLinkTest && <Badge color="default">Link Test</Badge>}
+                            </span>
+                          </td>
+                          <td className="px-6 py-3 text-sm font-mono">{request.model || '—'}</td>
+                          <td className="px-6 py-3"><Badge color={request.status_code >= 200 && request.status_code < 300 ? 'success' : 'error'}>{request.status_code || 'ERR'}</Badge></td>
+                          <td className="px-6 py-3 text-sm">{request.latency_ms}ms</td>
                         </tr>
                       )
                     })}
                   </tbody>
                 </table>
               </div>
-            </div>
-          )}
+            )}
+          </div>
+
+          <RequestDetailsModal request={selectedRequest} onClose={() => setSelectedRequest(null)} />
         </>
       )}
     </div>

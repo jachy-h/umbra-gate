@@ -42,7 +42,7 @@ func (s *Service) Aggregate(ctx context.Context) error {
 	rows, err := s.DB.Query(`
 		SELECT link_id, provider_id, model, status_code, latency_ms, success, attributes_json, created_at
 		FROM request_logs
-		WHERE created_at > ? AND created_at <= ?
+		WHERE julianday(created_at) > julianday(?) AND julianday(created_at) <= julianday(?)
 		ORDER BY created_at`, since, end.Format(time.RFC3339Nano))
 	if err != nil {
 		return err
@@ -62,7 +62,11 @@ func (s *Service) Aggregate(ctx context.Context) error {
 			rows.Close()
 			return err
 		}
-		t, _ := time.Parse(time.RFC3339, createdAt)
+		t, err := time.Parse(time.RFC3339Nano, createdAt)
+		if err != nil {
+			rows.Close()
+			return err
+		}
 		period := t.UTC().Format("2006-01-02T15")
 		attrs := models.Map{}
 		_ = json.Unmarshal([]byte(attrsJSON), &attrs)

@@ -21,7 +21,7 @@ func New(cfg config.Config, d *db.DB) (*gin.Engine, *stats.Service) {
 
 	statSvc := stats.New(d)
 	fwd := &proxy.Forwarder{DB: d, Stats: statSvc}
-	admin := &api.AdminAPI{DB: d}
+	admin := &api.AdminAPI{DB: d, Forwarder: fwd, StatsService: statSvc}
 	prox := &api.ProxyAPI{DB: d, Forwarder: fwd}
 
 	adminAuth := func(c *gin.Context) {
@@ -52,13 +52,26 @@ func New(cfg config.Config, d *db.DB) (*gin.Engine, *stats.Service) {
 		ag.GET("/links", admin.ListLinks)
 		ag.POST("/links", admin.CreateLink)
 		ag.GET("/links/:id", admin.GetLink)
+		ag.POST("/links/:id/test", admin.TestLink)
 		ag.DELETE("/links/:id", admin.DeleteLink)
 
 		ag.GET("/stats", admin.Stats)
+		ag.GET("/requests", admin.RecentRequests)
+		ag.GET("/validation-requests", admin.LatestValidationRequests)
 	}
 
-	// OpenAI-compatible proxy endpoint per link.
+	// OpenAI-compatible proxy endpoints per link. Support both common base URL
+	// conventions: clients may append /chat/completions or /v1/chat/completions.
+	r.GET("/llm-gateway-lite/:path", prox.Info)
+	r.GET("/llm-gateway-lite/:path/models", prox.Models)
+	r.GET("/llm-gateway-lite/:path/v1/models", prox.Models)
 	r.POST("/llm-gateway-lite/:path", prox.ChatCompletions)
+	r.POST("/llm-gateway-lite/:path/chat/completions", prox.ChatCompletions)
+	r.POST("/llm-gateway-lite/:path/v1/chat/completions", prox.ChatCompletions)
+	r.POST("/llm-gateway-lite/:path/responses", prox.Responses)
+	r.POST("/llm-gateway-lite/:path/v1/responses", prox.Responses)
+	r.POST("/llm-gateway-lite/:path/messages", prox.Messages)
+	r.POST("/llm-gateway-lite/:path/v1/messages", prox.Messages)
 
 	r.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) })
 

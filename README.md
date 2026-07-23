@@ -19,7 +19,7 @@ umbragate
 - **Single binary, zero deps.** API gateway, admin UI, and SQLite — all embedded. Just run it.
 - **Chain & failover.** Stack providers by priority. Each gets retry counts, status-code rules, error matching, timeout policies, and fallback model overrides. One fails, the next fires.
 - **Attribute-driven analytics.** Tag links and requests with `key:value` attributes. Stats auto-aggregate hourly by link × provider × attribute — cost allocation and usage tracking built in.
-- **Provider freedom.** Native support for OpenAI, Anthropic, Gemini, DeepSeek, Qwen. Any OpenAI-compatible API works as a custom provider. Hot-reload — no restarts.
+- **Two native protocol styles.** Links are explicitly OpenAI Style or Anthropic Style and cannot mix the two. OpenAI Chat Completions and Responses, plus Anthropic Messages, are sent through the vendors' official Go SDKs. Compatible providers can declare multiple endpoint formats and base URLs.
 - **Web console included.** A React SPA ships inside the binary. Manage links, configure chains, browse stats — all from the browser.
 
 ## Getting Started
@@ -35,6 +35,8 @@ Or build from source: `make && ./umbragate` (requires Go + Node.js).
 2. Add your providers (OpenAI, Anthropic, DeepSeek, …) with their API keys.
 3. Create a proxy link, stack providers in priority order, set fallback rules.
 4. Copy the link's URL and paste it into your favorite AI client — OpenCode, Cursor, ChatGPT client, or any OpenAI-compatible tool.
+
+OpenAI Style links expose `/v1/chat/completions` and `/v1/responses`. Anthropic Style links expose `/v1/messages`.
 
 That's it. Your requests are now automatically routed with failover, logged, and analyzed.
 

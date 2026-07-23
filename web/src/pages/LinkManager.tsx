@@ -1,24 +1,30 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
-import type { ProxyLink, Provider } from '../types'
+import type { ProxyLink, Provider, RequestLog } from '../types'
 import { useHash } from '../hooks/useHash'
 import { Card } from '../components/Card'
 import { Badge } from '../components/Badge'
 import { Button } from '../components/Button'
 import { Spinner } from '../components/Spinner'
+import { RequestDetailsModal } from '../components/RequestDetailsModal'
+import { protocolLabel } from '../protocols'
 
 export function LinkManager() {
   const [links, setLinks] = useState<ProxyLink[]>([])
   const [providers, setProviders] = useState<Provider[]>([])
+  const [requests, setRequests] = useState<RequestLog[]>([])
+  const [selectedRequest, setSelectedRequest] = useState<RequestLog | null>(null)
   const [loading, setLoading] = useState(true)
+  const [testingLinkID, setTestingLinkID] = useState<string | null>(null)
   const { navigate } = useHash()
 
   const fetchAll = () => {
     setLoading(true)
-    Promise.all([api.listLinks(), api.listProviders()])
-      .then(([l, p]) => {
+    return Promise.all([api.listLinks(), api.listProviders(), api.listValidationRequests()])
+      .then(([l, p, r]) => {
         setLinks(l)
         setProviders(p)
+        setRequests(r)
       })
       .catch(console.error)
       .finally(() => setLoading(false))
@@ -32,6 +38,18 @@ export function LinkManager() {
       await api.deleteLink(id)
       fetchAll()
     } catch (e: unknown) { alert(e instanceof Error ? e.message : 'Delete failed') }
+  }
+
+  const testLink = async (id: string) => {
+    setTestingLinkID(id)
+    try {
+      await api.testLink(id)
+      await fetchAll()
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : 'Link test failed')
+    } finally {
+      setTestingLinkID(null)
+    }
   }
 
   const gatewayBase = (import.meta.env.VITE_GATEWAY_BASE as string | undefined)?.replace(/\/$/, '') || `http://${window.location.hostname}:8787`
@@ -53,6 +71,15 @@ export function LinkManager() {
   }
 
   const providerName = (id: string) => providers.find((p) => p.id === id)?.name || id
+
+  const validationRequest = (linkId: string, providerId: string, position: number) => {
+    const matching = requests.filter((request) =>
+      request.link_id === linkId &&
+      request.provider_id === providerId &&
+      request.attributes?._request_type === 'link_validation'
+    )
+    return matching.find((request) => Number(request.attributes?._chain_position) === position) || matching[0]
+  }
 
   return (
     <div className="space-y-8 animate-fade-in">
@@ -80,16 +107,21 @@ export function LinkManager() {
             <thead>
               <tr className="border-b border-[var(--color-hairline-soft)] text-left text-sm font-medium text-[var(--color-muted)]">
                 <th className="px-8 py-3 font-medium">Name</th>
+                <th className="px-8 py-3 font-medium">Protocol</th>
                 <th className="px-8 py-3 font-medium">Proxy URL</th>
                 <th className="px-8 py-3 font-medium">Chain</th>
-                <th className="px-8 py-3 font-medium">Status</th>
-                <th className="px-8 py-3 font-medium w-32" />
+                <th className="px-8 py-3 font-medium w-48" />
               </tr>
             </thead>
             <tbody>
               {links.map((l) => (
                 <tr key={l.id} className="border-b border-[var(--color-hairline-soft)] last:border-b-0 hover:bg-[var(--color-surface-soft)] transition-colors">
-                  <td className="px-8 py-4 text-sm font-semibold text-[var(--color-ink)]">{l.name}</td>
+                  <td className="px-8 py-4">
+                    <div className="text-sm font-semibold text-[var(--color-ink)]">{l.name}</div>
+                  </td>
+                  <td className="px-8 py-4 text-sm text-[var(--color-muted)]">
+                    {protocolLabel(l.protocol)}
+                  </td>
                   <td className="px-8 py-4 text-sm">
                     <div className="flex items-center gap-2">
                       <code
@@ -114,6 +146,9 @@ export function LinkManager() {
                     <div className="flex items-center flex-wrap gap-1.5">
                       {l.chain?.map((c, i) => {
                         const hasOverride = !!c.api_key
+                        const failed = c.validation_ok === false
+                        const protocolMismatch = c.protocol !== l.protocol
+                        const testRequest = validationRequest(l.id, c.provider_id, i)
                         return (
                           <span key={i} className="flex items-center gap-1.5">
                             {i > 0 && (
@@ -121,20 +156,33 @@ export function LinkManager() {
                                 <path d="M5 12h14M13 5l7 7-7 7" />
                               </svg>
                             )}
-                            <Badge color={i === 0 ? 'violet' : i === l.chain!.length - 1 ? 'emerald' : 'orange'}>
-                              {providerName(c.provider_id)}
-                              {hasOverride && ' *'}
-                            </Badge>
+                            <button
+                              type="button"
+                              onClick={() => testRequest && setSelectedRequest(testRequest)}
+                              className={`rounded-full text-left transition-opacity ${failed && !protocolMismatch ? 'grayscale opacity-40' : ''} ${testRequest ? 'cursor-pointer hover:opacity-75' : 'cursor-default'}`}
+                              title={protocolMismatch ? `Protocol mismatch: link requires ${protocolLabel(l.protocol)}` : testRequest ? 'View Link Test request' : failed ? c.validation_error || 'Validation failed' : 'No Link Test request recorded'}
+                            >
+                              <Badge color={protocolMismatch ? 'error' : i === 0 ? 'violet' : i === l.chain!.length - 1 ? 'emerald' : 'orange'}>
+                                {providerName(c.provider_id)}
+                                {hasOverride && ' *'}
+                              </Badge>
+                            </button>
                           </span>
                         )
                       })}
                     </div>
                   </td>
-                  <td className="px-8 py-4 text-sm">
-                    <Badge color={l.enabled ? 'success' : 'error'}>{l.enabled ? 'Active' : 'Disabled'}</Badge>
-                  </td>
                   <td className="px-8 py-4">
                     <div className="flex gap-2">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => testLink(l.id)}
+                        disabled={testingLinkID === l.id}
+                        title="Run a Link Test against every provider in this chain"
+                      >
+                        {testingLinkID === l.id ? 'Testing…' : 'Test'}
+                      </Button>
                       <Button variant="ghost" size="sm" onClick={() => navigate(`/links/edit/${l.id}`)}>Edit</Button>
                       <Button variant="ghost" size="sm" onClick={() => remove(l.id)} className="!text-[var(--color-error)]">Del</Button>
                     </div>
@@ -145,6 +193,7 @@ export function LinkManager() {
           </table>
         </div>
       )}
+      <RequestDetailsModal request={selectedRequest} onClose={() => setSelectedRequest(null)} />
     </div>
   )
 }

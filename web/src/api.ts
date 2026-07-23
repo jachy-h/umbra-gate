@@ -25,7 +25,11 @@ export const api = {
   createLink: (l: Partial<import('./types').ProxyLink>) =>
     request<import('./types').ProxyLink>('/links', { method: 'POST', body: JSON.stringify(l) }),
   getLink: (id: string) => request<import('./types').ProxyLink>(`/links/${id}`),
+  testLink: (id: string) => request<import('./types').ProxyLink>(`/links/${id}/test`, { method: 'POST' }),
   deleteLink: (id: string) => request<void>(`/links/${id}`, { method: 'DELETE' }),
+
+  listRecentRequests: async () => (await request<import('./types').RequestLog[] | null>('/requests')) ?? [],
+  listValidationRequests: async () => (await request<import('./types').RequestLog[] | null>('/validation-requests')) ?? [],
 
   getStats: (params?: { link_id?: string; from?: string; to?: string }) => {
     const qs = new URLSearchParams()

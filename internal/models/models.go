@@ -2,28 +2,49 @@ package models
 
 import "time"
 
+const (
+	ProtocolOpenAI    = "openai"
+	ProtocolAnthropic = "anthropic"
+
+	FormatChatCompletions = "chat_completions"
+	FormatResponses       = "responses"
+	FormatMessages        = "messages"
+)
+
+type ProviderEndpoint struct {
+	Protocol       string `json:"protocol"`
+	RequestFormat  string `json:"request_format"`
+	ResponseFormat string `json:"response_format"`
+	BaseURL        string `json:"base_url"`
+}
+
 type Provider struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Type      string    `json:"type"` // openai | anthropic | gemini | deepseek | qwen | custom
-	BaseURL   string    `json:"base_url"`
-	APIKey    string    `json:"api_key,omitempty"`
-	Models    []string  `json:"models"`
-	Extra     Map       `json:"extra,omitempty"`
-	Enabled   bool      `json:"enabled"`
-	Builtin   bool      `json:"builtin"`
-	HasAPIKey bool      `json:"has_api_key"`
-	CreatedAt time.Time `json:"created_at"`
+	ID        string             `json:"id"`
+	Name      string             `json:"name"`
+	Type      string             `json:"type"`     // openai | anthropic | gemini | deepseek | qwen | custom
+	BaseURL   string             `json:"base_url"` // legacy primary URL; endpoints is authoritative
+	Endpoints []ProviderEndpoint `json:"endpoints"`
+	APIKey    string             `json:"api_key,omitempty"`
+	Models    []string           `json:"models"`
+	Extra     Map                `json:"extra,omitempty"`
+	Enabled   bool               `json:"enabled"`
+	Builtin   bool               `json:"builtin"`
+	HasAPIKey bool               `json:"has_api_key"`
+	CreatedAt time.Time          `json:"created_at"`
 }
 
 type Map map[string]any
 
 type ChainEntry struct {
-	ProviderID    string `json:"provider_id"`
-	RetryCount    int    `json:"retry_count"`      // extra retries on same provider before fallback
-	FallbackModel string `json:"fallback_model"`   // optional model override when falling back
-	ApiKey        string `json:"api_key,omitempty"` // override provider's global api key
-	Rules         Rules  `json:"rules,omitempty"`  // when to fallback
+	ProviderID      string    `json:"provider_id"`
+	Protocol        string    `json:"protocol"`
+	RetryCount      int       `json:"retry_count"`       // extra retries on same provider before fallback
+	FallbackModel   string    `json:"fallback_model"`    // optional model override when falling back
+	ApiKey          string    `json:"api_key,omitempty"` // override provider's global api key
+	Rules           Rules     `json:"rules,omitempty"`   // when to fallback
+	ValidationOK    *bool     `json:"validation_ok,omitempty"`
+	ValidationError string    `json:"validation_error,omitempty"`
+	ValidatedAt     time.Time `json:"validated_at,omitempty"`
 }
 
 type Rules struct {
@@ -35,7 +56,8 @@ type Rules struct {
 type ProxyLink struct {
 	ID         string       `json:"id"`
 	Name       string       `json:"name"`
-	Path       string       `json:"path"`       // proxy url token
+	Path       string       `json:"path"` // proxy url token
+	Protocol   string       `json:"protocol"`
 	Attributes Map          `json:"attributes"` // for stats grouping
 	Chain      []ChainEntry `json:"chain"`
 	Enabled    bool         `json:"enabled"`
@@ -43,18 +65,26 @@ type ProxyLink struct {
 }
 
 type RequestLog struct {
-	ID           string    `json:"id"`
-	LinkID       string    `json:"link_id"`
-	Path         string    `json:"path"`
-	ProviderID   string    `json:"provider_id"`
-	ProviderName string    `json:"provider_name"`
-	Model        string    `json:"model"`
-	StatusCode   int       `json:"status_code"`
-	LatencyMS    int64     `json:"latency_ms"`
-	Success      bool      `json:"success"`
-	ErrorMessage string    `json:"error_message,omitempty"`
-	Attributes   Map       `json:"attributes,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID              string    `json:"id"`
+	LinkID          string    `json:"link_id"`
+	Path            string    `json:"path"`
+	ProviderID      string    `json:"provider_id"`
+	ProviderName    string    `json:"provider_name"`
+	Model           string    `json:"model"`
+	StatusCode      int       `json:"status_code"`
+	LatencyMS       int64     `json:"latency_ms"`
+	Success         bool      `json:"success"`
+	ErrorMessage    string    `json:"error_message,omitempty"`
+	RequestURL      string    `json:"request_url,omitempty"`
+	RequestHeaders  Map       `json:"request_headers,omitempty"`
+	RequestBody     string    `json:"request_body,omitempty"`
+	UpstreamURL     string    `json:"upstream_url,omitempty"`
+	UpstreamHeaders Map       `json:"upstream_headers,omitempty"`
+	UpstreamBody    string    `json:"upstream_body,omitempty"`
+	ResponseHeaders Map       `json:"response_headers,omitempty"`
+	ResponseBody    string    `json:"response_body,omitempty"`
+	Attributes      Map       `json:"attributes,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 type Stats struct {
