@@ -20,7 +20,7 @@ umbragate start
 - **Chain & failover.** Stack providers by priority. Each gets retry counts, status-code rules, error matching, timeout policies, and fallback model overrides. One fails, the next fires.
 - **Attribute-driven analytics.** Tag links with `key:value` attributes. Stats auto-aggregate hourly by link × provider × attribute — cost allocation and usage tracking built in.
 - **Two native protocol styles.** Links are explicitly OpenAI Style or Anthropic Style and cannot mix the two. OpenAI Chat Completions and Responses, plus Anthropic Messages, are sent through the vendors' official Go SDKs. Compatible providers can declare multiple endpoint formats and base URLs.
-- **Web console included.** A React SPA ships inside the binary. Manage links, configure chains, browse stats — all from the browser.
+- **Web console included.** A React SPA ships inside the binary. Manage links, configure chains, browse stats — all from the browser. Link chains use searchable protocol selectors, default each new step to one retry, and allow the final provider to be removed.
 
 ## Getting Started
 
@@ -57,7 +57,7 @@ umbragate run
 umbragate --help
 ```
 
-`start` runs in the background; `run` runs in the foreground. After a background start, `start` and `status` display the Web UI URL so it can be opened directly from the terminal. Both modes use `~/.umbragate/config.yaml` by default. Pass a custom configuration with `umbragate start -config /path/to/config.yaml`, `umbragate restart -config /path/to/config.yaml`, or `umbragate run -config /path/to/config.yaml`. Runtime files are stored in `~/.umbragate/`: `umbragate.pid` records the background process, `umbragate.url` records its Web UI URL, and `umbragate.log` contains its output. Running `umbragate` without a command is equivalent to `umbragate run`.
+`start` runs in the background; `run` runs in the foreground. After a background start, `start` and `status` display the Web UI URL so it can be opened directly from the terminal. Running `start` again while UmbraGate is already running displays the same status instead of failing. Both modes use `~/.umbragate/config.yaml` by default. Pass a custom configuration with `umbragate start -config /path/to/config.yaml`, `umbragate restart -config /path/to/config.yaml`, or `umbragate run -config /path/to/config.yaml`. Runtime files are stored in `~/.umbragate/`: `umbragate.pid` records the background process, `umbragate.url` records its Web UI URL, and `umbragate.log` contains its output. Running `umbragate` without a command is equivalent to `umbragate run`.
 
 ---
 

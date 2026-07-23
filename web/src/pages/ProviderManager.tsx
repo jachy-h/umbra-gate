@@ -241,7 +241,7 @@ export function ProviderManager() {
                   </td>
                   <td className="px-8 py-4">
                     <div className="flex gap-2">
-                      <Button variant="ghost" size="sm" onClick={() => openEdit(p)}>Edit</Button>
+                      {!p.builtin && <Button variant="ghost" size="sm" onClick={() => openEdit(p)}>Edit</Button>}
                       {!p.builtin && (
                         <Button variant="ghost" size="sm" onClick={() => remove(p.id)} className="!text-[var(--color-error)]">Del</Button>
                       )}

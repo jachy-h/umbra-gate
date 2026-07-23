@@ -7,7 +7,7 @@ import { SearchableSelect } from '../components/SearchableSelect'
 import { Spinner } from '../components/Spinner'
 import { protocolLabel } from '../protocols'
 
-const blankChainEntry = (): ChainEntry => ({ provider_id: '', protocol: '', retry_count: 0, fallback_model: '', api_key: '' })
+const blankChainEntry = (): ChainEntry => ({ provider_id: '', protocol: '', retry_count: 1, fallback_model: '', api_key: '' })
 
 interface Props {
   link?: ProxyLink | null
@@ -52,8 +52,7 @@ export function LinkEditor({ link, onSaved, onCancel }: Props) {
   }
 
   const removeChainEntry = (i: number) => {
-    if (chain.length <= 1) return
-    setChain((prev) => prev.filter((_, idx) => idx !== i))
+    setChain((prev) => prev.length === 1 ? [blankChainEntry()] : prev.filter((_, idx) => idx !== i))
   }
 
   const moveChainEntry = (i: number, direction: 'up' | 'down') => {
@@ -228,8 +227,8 @@ export function LinkEditor({ link, onSaved, onCancel }: Props) {
               const isFirst = i === 0
               const isLast = i === chain.length - 1
               return (
-                <div key={i} className={`relative overflow-hidden rounded-xl border-2 bg-[var(--color-canvas)] transition-colors ${
-                  protocolMismatchIndexes.has(i) ? 'border-red-500 shadow-[0_0_0_3px_rgba(239,68,68,0.10)]' : isFirst ? 'border-[var(--color-ink)]' : 'border-[var(--color-hairline)]'
+                <div key={i} className={`relative rounded-xl border bg-[var(--color-canvas)] transition-colors ${
+                  protocolMismatchIndexes.has(i) ? 'border-red-500 shadow-[0_0_0_3px_rgba(239,68,68,0.10)]' : 'border-[var(--color-hairline)]'
                 }`}>
                   {/* Header */}
                   <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--color-hairline-soft)]">
@@ -275,17 +274,15 @@ export function LinkEditor({ link, onSaved, onCancel }: Props) {
                           </svg>
                         </button>
                       )}
-                      {chain.length > 1 && (
-                        <button
-                          onClick={() => removeChainEntry(i)}
-                          className="inline-flex items-center justify-center w-7 h-7 rounded-md text-[var(--color-error)] hover:bg-[var(--color-error)]/10 transition-colors cursor-pointer"
-                          title="Remove"
-                        >
+                      <button
+                        onClick={() => removeChainEntry(i)}
+                        className="inline-flex items-center justify-center w-7 h-7 rounded-md text-[var(--color-error)] hover:bg-[var(--color-error)]/10 transition-colors cursor-pointer"
+                        title="Remove"
+                      >
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14" />
                           </svg>
-                        </button>
-                      )}
+                      </button>
                     </div>
                   </div>
 
@@ -317,19 +314,16 @@ export function LinkEditor({ link, onSaved, onCancel }: Props) {
                       </div>
                       <div className="col-span-3 space-y-1.5">
                         <label className={labelCls}>{isFirst ? 'Link Protocol' : 'Protocol'}</label>
-                        <select
+                        <SearchableSelect
+                          options={providerProtocols(provider).map((protocol) => ({ label: protocolLabel(protocol), value: protocol }))}
                           value={entry.protocol}
-                          onChange={(event) => updateChain(i, 'protocol', event.target.value)}
+                          onChange={(value) => updateChain(i, 'protocol', value)}
                           disabled={!provider}
-                          className={`${fieldCls} ${protocolMismatchIndexes.has(i) ? '!border-red-500 !text-red-700' : ''}`}
-                        >
-                          <option value="">Select protocol…</option>
-                          {providerProtocols(provider).map((protocol) => (
-                            <option key={protocol} value={protocol}>{protocolLabel(protocol)}</option>
-                          ))}
-                        </select>
+                          placeholder="Select protocol…"
+                          className={protocolMismatchIndexes.has(i) ? '!border-red-500 !text-red-700' : ''}
+                        />
                       </div>
-                      <div className="col-span-1 space-y-1.5">
+                      <div className="col-span-2 space-y-1.5">
                         <label className={labelCls}>Retry</label>
                         <input
                           type="number"
@@ -339,7 +333,10 @@ export function LinkEditor({ link, onSaved, onCancel }: Props) {
                           min={0}
                         />
                       </div>
-                      <div className="col-span-4 space-y-1.5">
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
                         <label className={labelCls}>Fallback Model</label>
                         <input
                           value={entry.fallback_model}
@@ -348,19 +345,18 @@ export function LinkEditor({ link, onSaved, onCancel }: Props) {
                           className={fieldCls}
                         />
                       </div>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className={labelCls}>
-                        API Key {hasGlobalKey && '(override global)'}
-                      </label>
-                      <input
-                        type="password"
-                        value={entry.api_key || ''}
-                        onChange={(e) => updateChain(i, 'api_key', e.target.value)}
-                        placeholder={hasGlobalKey ? 'Leave empty to use global key' : 'sk-...'}
-                        className={fieldCls}
-                      />
+                      <div className="space-y-1.5">
+                        <label className={labelCls}>API Key {hasGlobalKey && '(override global)'}</label>
+                        <input
+                          type="text"
+                          autoComplete="off"
+                          name={`link-api-key-${i}`}
+                          value={entry.api_key || ''}
+                          onChange={(e) => updateChain(i, 'api_key', e.target.value)}
+                          placeholder={hasGlobalKey ? 'Leave empty to use global key' : 'sk-...'}
+                          className={fieldCls}
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>

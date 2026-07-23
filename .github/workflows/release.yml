@@ -91,7 +91,7 @@ jobs:
           (cd dist && shasum -a 256 umbragate_Darwin_arm64.tar.gz umbragate_Darwin_x86_64.tar.gz > sha256sums.txt)
 
       - name: Publish GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
           files: |

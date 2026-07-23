@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 
 interface Option {
   label: string
@@ -27,6 +28,7 @@ export function SearchableSelect({
   const [highlightIndex, setHighlightIndex] = useState(-1)
   const containerRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
+  const [menuPosition, setMenuPosition] = useState<{ left: number; top: number; width: number } | null>(null)
 
   const selectedLabel = useMemo(
     () => options.find((option) => option.value === value)?.label || '',
@@ -45,7 +47,8 @@ export function SearchableSelect({
 
   useEffect(() => {
     function handleOutsideClick(event: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+      const target = event.target as Node
+      if (!containerRef.current?.contains(target) && !listRef.current?.contains(target)) {
         setOpen(false)
         setQuery('')
       }
@@ -59,6 +62,24 @@ export function SearchableSelect({
       listRef.current.children[highlightIndex].scrollIntoView({ block: 'nearest' })
     }
   }, [highlightIndex])
+
+  useEffect(() => {
+    if (!open) {
+      setMenuPosition(null)
+      return
+    }
+    const updateMenuPosition = () => {
+      const rect = containerRef.current?.getBoundingClientRect()
+      if (rect) setMenuPosition({ left: rect.left, top: rect.bottom + 4, width: rect.width })
+    }
+    updateMenuPosition()
+    window.addEventListener('resize', updateMenuPosition)
+    window.addEventListener('scroll', updateMenuPosition, true)
+    return () => {
+      window.removeEventListener('resize', updateMenuPosition)
+      window.removeEventListener('scroll', updateMenuPosition, true)
+    }
+  }, [open])
 
   const choose = useCallback((nextValue: string) => {
     onChange(nextValue)
@@ -129,8 +150,11 @@ export function SearchableSelect({
         <path d="M6 9l6 6 6-6" />
       </svg>
 
-      {open && (
-        <div className="absolute z-50 mt-1 w-full overflow-hidden rounded-lg border border-[var(--color-hairline)] bg-[var(--color-canvas)] shadow-[0_4px_12px_rgba(0,0,0,0.08)] animate-fade-in">
+      {open && menuPosition && createPortal(
+        <div
+          className="fixed z-[100] overflow-hidden rounded-lg border border-[var(--color-hairline)] bg-[var(--color-canvas)] shadow-[0_8px_24px_rgba(0,0,0,0.12)] animate-fade-in"
+          style={{ left: menuPosition.left, top: menuPosition.top, width: menuPosition.width }}
+        >
           <div ref={listRef} role="listbox" className="max-h-52 overflow-y-auto">
             {filtered.length === 0 ? (
               <div className="px-3 py-4 text-center text-sm text-[var(--color-muted)]">No results found</div>
@@ -156,7 +180,8 @@ export function SearchableSelect({
               ))
             )}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )

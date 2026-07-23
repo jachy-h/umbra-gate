@@ -20,7 +20,7 @@ umbragate start
 - **链路式故障切换。** 按优先级堆叠多个 Provider，每个可配置重试次数、状态码规则、错误匹配、超时策略和降级模型。一个挂了，下一个顶上。
 - **按属性统计。** 给链接打上 `键:值` 属性标签，统计按 链接 × Provider × 属性 × 小时 自动聚合 —— 成本分摊、用量追踪一步到位。
 - **两类原生协议风格。** Link 明确区分 OpenAI Style 与 Anthropic Style，二者不能混编。OpenAI Chat Completions、Responses 与 Anthropic Messages 均通过厂商官方 Go SDK 发出；兼容 Provider 可声明多个端点格式和 Base URL。
-- **自带 Web 控制台。** React SPA 随二进制一同打包。在浏览器里管理链接、配置链路、查看统计 —— 不用敲 CLI，不用写配置（当然 config.yaml 需要时也在）。
+- **自带 Web 控制台。** React SPA 随二进制一同打包。在浏览器里管理链接、配置链路、查看统计 —— 不用敲 CLI，不用写配置（当然 config.yaml 需要时也在）。Link 链路使用可搜索的协议选择器，新步骤默认重试一次，且最后一个 Provider 也可以移除。
 
 ## 快速上手
 
@@ -57,7 +57,7 @@ umbragate run
 umbragate --help
 ```
 
-`start` 在后台运行，`run` 在前台运行。后台启动后，`start` 和 `status` 会显示 Web UI URL，可直接从终端打开。两种模式默认都使用 `~/.umbragate/config.yaml`。自定义配置可使用 `umbragate start -config /path/to/config.yaml`、`umbragate restart -config /path/to/config.yaml` 或 `umbragate run -config /path/to/config.yaml`。运行时文件位于 `~/.umbragate/`：`umbragate.pid` 记录后台进程，`umbragate.url` 记录 Web UI URL，`umbragate.log` 保存输出。不带命令执行 `umbragate` 等同于 `umbragate run`。
+`start` 在后台运行，`run` 在前台运行。后台启动后，`start` 和 `status` 会显示 Web UI URL，可直接从终端打开；UmbraGate 已运行时再次执行 `start`，会显示同样的状态而不是报错。两种模式默认都使用 `~/.umbragate/config.yaml`。自定义配置可使用 `umbragate start -config /path/to/config.yaml`、`umbragate restart -config /path/to/config.yaml` 或 `umbragate run -config /path/to/config.yaml`。运行时文件位于 `~/.umbragate/`：`umbragate.pid` 记录后台进程，`umbragate.url` 记录 Web UI URL，`umbragate.log` 保存输出。不带命令执行 `umbragate` 等同于 `umbragate run`。
 
 ---
 

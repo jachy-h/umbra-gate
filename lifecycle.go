@@ -78,7 +78,7 @@ func startDaemon(configPath string) error {
 		return err
 	}
 	if pid != 0 {
-		return fmt.Errorf("%s is already running (PID %d)", appName, pid)
+		return daemonStatus()
 	}
 
 	// Load once before spawning so invalid configuration fails synchronously.
