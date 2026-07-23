@@ -14,7 +14,7 @@ permissions:
   contents: write
 
 jobs:
-  test:
+  verify-release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -23,11 +23,27 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build frontend (embedded into the Go binary)
+        run: |
+          cd web
+          npm ci
+          npm run build
+          test -f ../internal/web/dist/index.html
+
+      - name: Build embedded release binary
+        run: go build -trimpath -ldflags="-s -w" -o /tmp/umbragate-release-check .
+
       - name: Run tests
         run: go test ./...
 
   release:
-    needs: test
+    needs: verify-release
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.meta.outputs.version }}

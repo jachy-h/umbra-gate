@@ -59,6 +59,10 @@ umbragate --help
 
 `start` runs in the background; `run` runs in the foreground. After a background start, `start` and `status` display the Web UI URL so it can be opened directly from the terminal. Running `start` again while UmbraGate is already running displays the same status instead of failing. Both modes use `~/.umbragate/config.yaml` by default. Pass a custom configuration with `umbragate start -config /path/to/config.yaml`, `umbragate restart -config /path/to/config.yaml`, or `umbragate run -config /path/to/config.yaml`. Runtime files are stored in `~/.umbragate/`: `umbragate.pid` records the background process, `umbragate.url` records its Web UI URL, and `umbragate.log` contains its output. Running `umbragate` without a command is equivalent to `umbragate run`.
 
+## Release verification
+
+Every release is validated before publication: CI builds the React frontend, verifies that it is embedded, compiles the Go binary, and runs the Go test suite. Release archives contain this fully self-contained binary plus `config.yaml` for Apple Silicon and Intel Macs.
+
 ---
 
 [Admin API reference](https://github.com/jachy-h/umbragate) &nbsp;|&nbsp; [中文](./README_zh.md)

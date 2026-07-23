@@ -59,6 +59,10 @@ umbragate --help
 
 `start` 在后台运行，`run` 在前台运行。后台启动后，`start` 和 `status` 会显示 Web UI URL，可直接从终端打开；UmbraGate 已运行时再次执行 `start`，会显示同样的状态而不是报错。两种模式默认都使用 `~/.umbragate/config.yaml`。自定义配置可使用 `umbragate start -config /path/to/config.yaml`、`umbragate restart -config /path/to/config.yaml` 或 `umbragate run -config /path/to/config.yaml`。运行时文件位于 `~/.umbragate/`：`umbragate.pid` 记录后台进程，`umbragate.url` 记录 Web UI URL，`umbragate.log` 保存输出。不带命令执行 `umbragate` 等同于 `umbragate run`。
 
+## 发布验证
+
+每个版本在发布前都会经过验证：CI 构建 React 前端，确认其已嵌入，编译 Go 二进制，并运行 Go 测试套件。发布归档包含这个完整自包含的二进制及 `config.yaml`，同时提供 Apple Silicon 与 Intel Mac 版本。
+
 ---
 
 [管理 API 参考](https://github.com/jachy-h/umbragate) &nbsp;|&nbsp; [English](./README.md)
