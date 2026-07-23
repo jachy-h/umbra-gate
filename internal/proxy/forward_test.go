@@ -73,6 +73,37 @@ func TestHandleFallsBackOnAnyFailedResponse(t *testing.T) {
 	}
 }
 
+func TestHandleUsesOnlyLinkConfiguredAttributes(t *testing.T) {
+	providers.Register(fallbackTestAdapter{})
+	database, err := db.Open(filepath.Join(t.TempDir(), "gateway.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	provider := models.Provider{ID: "succeeded", Name: "succeeded-test", Type: "fallback-test", BaseURL: "http://unused", Endpoints: []models.ProviderEndpoint{{Protocol: models.ProtocolOpenAI, RequestFormat: models.FormatChatCompletions, ResponseFormat: models.FormatChatCompletions, BaseURL: "http://unused"}}, Enabled: true, CreatedAt: time.Now()}
+	if err := database.UpsertProvider(provider); err != nil {
+		t.Fatal(err)
+	}
+	forwarder := &Forwarder{DB: database, Stats: stats.New(database)}
+	link := models.ProxyLink{ID: "link", Path: "token", Protocol: models.ProtocolOpenAI, Attributes: models.Map{"environment": "production"}, Chain: []models.ChainEntry{{ProviderID: provider.ID, Protocol: models.ProtocolOpenAI}}}
+	req := httptest.NewRequest(http.MethodPost, "/llm-gateway-lite/token/v1/chat/completions", strings.NewReader(`{"model":"test","messages":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("X-Gateway-Attributes", `{"untrusted":"random-value","environment":"overridden"}`)
+
+	forwarder.Handle(httptest.NewRecorder(), req, link)
+
+	logs, err := database.ListRecentLogs(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 1 || logs[0].Attributes["environment"] != "production" {
+		t.Fatalf("configured attributes were not retained: %+v", logs)
+	}
+	if _, exists := logs[0].Attributes["untrusted"]; exists {
+		t.Fatalf("caller-supplied attributes were stored: %+v", logs[0].Attributes)
+	}
+}
+
 type fallbackTestAdapter struct{}
 
 func (fallbackTestAdapter) Type() string { return "fallback-test" }

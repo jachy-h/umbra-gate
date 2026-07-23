@@ -8,7 +8,10 @@
 #   make            -> web + go build (default)
 #   make web        -> build the frontend only
 #   make build      -> build the Go binary (assumes web assets exist)
-#   make run        -> web + go run
+#   make run        -> web + go run (foreground)
+#   make start      -> web + build + start in background
+#   make stop       -> stop the background process
+#   make restart    -> web + build + restart in background
 #   make test       -> go test ./...
 #   make clean      -> remove built artifacts
 
@@ -21,7 +24,7 @@ WEB_DIST      ?= internal/web/dist
 LDFLAGS       := -s -w
 GOFLAGS       := -trimpath
 
-.PHONY: all web build run test clean install check-web
+.PHONY: all web build run start stop restart status test clean install check-web
 
 all: web build
 
@@ -43,6 +46,18 @@ build: check-web
 
 run: web
 	$(GO) run $(PKG)
+
+start: web build
+	./$(BINARY) start
+
+stop: build
+	./$(BINARY) stop
+
+restart: web build
+	./$(BINARY) restart
+
+status: build
+	./$(BINARY) status
 
 test:
 	$(GO) test ./...

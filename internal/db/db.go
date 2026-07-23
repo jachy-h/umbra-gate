@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 
 type DB struct {
 	*sql.DB
+	path string
 }
 
 func Open(path string) (*DB, error) {
@@ -24,7 +27,7 @@ func Open(path string) (*DB, error) {
 	if err := d.Ping(); err != nil {
 		return nil, err
 	}
-	db := &DB{d}
+	db := &DB{DB: d, path: path}
 	if err := db.migrate(); err != nil {
 		return nil, err
 	}
@@ -104,6 +107,7 @@ func (d *DB) migrate() error {
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_logs_link_created ON request_logs(link_id, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_logs_created ON request_logs(created_at)`,
 		`ALTER TABLE request_logs ADD COLUMN request_url TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE request_logs ADD COLUMN request_headers_json TEXT NOT NULL DEFAULT '{}'`,
 		`ALTER TABLE request_logs ADD COLUMN request_body TEXT NOT NULL DEFAULT ''`,
@@ -140,6 +144,54 @@ func (d *DB) migrate() error {
 	}
 	return nil
 }
+
+// DatabaseSize returns the on-disk SQLite database and its WAL size.
+func (d *DB) DatabaseSize() (int64, error) {
+	var total int64
+	for _, path := range []string{d.path, d.path + "-wal"} {
+		info, err := os.Stat(path)
+		if err == nil {
+			total += info.Size()
+			continue
+		}
+		if !os.IsNotExist(err) {
+			return 0, err
+		}
+	}
+	return total, nil
+}
+
+// PruneOldestRequestLogs removes one bounded batch, then compacts the database
+// so the configured filesystem limit is actually recovered.
+func (d *DB) PruneOldestRequestLogs(limit int) (int64, error) {
+	if limit <= 0 {
+		return 0, nil
+	}
+	result, err := d.Exec(`DELETE FROM request_logs WHERE rowid IN (SELECT rowid FROM request_logs ORDER BY created_at, rowid LIMIT ?)`, limit)
+	if err != nil {
+		return 0, err
+	}
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if deleted > 0 {
+		if _, err := d.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+			return deleted, err
+		}
+		if _, err := d.Exec(`VACUUM`); err != nil {
+			return deleted, err
+		}
+	}
+	return deleted, nil
+}
+
+func (d *DB) DeleteRequestLogsBefore(cutoff time.Time) error {
+	_, err := d.Exec(`DELETE FROM request_logs WHERE created_at < ?`, cutoff.UTC().Format(time.RFC3339Nano))
+	return err
+}
+
+func (d *DB) Path() string { return filepath.Clean(d.path) }
 
 func enc(v any) string {
 	b, _ := json.Marshal(v)

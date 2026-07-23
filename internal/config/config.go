@@ -12,6 +12,8 @@ type Config struct {
 	DB         DB         `yaml:"db"`
 	Aggregator Aggregator `yaml:"aggregator"`
 	Admin      Admin      `yaml:"admin"`
+	Storage    Storage    `yaml:"storage"`
+	Logging    Logging    `yaml:"logging"`
 }
 
 type Server struct {
@@ -28,6 +30,23 @@ type Aggregator struct {
 
 type Admin struct {
 	Token string `yaml:"token"`
+}
+
+type Storage struct {
+	RequestLogsRetentionDays int `yaml:"request_logs_retention_days"`
+	MaxDatabaseSizeMB        int `yaml:"max_database_size_mb"`
+	LogPruneBatchSize        int `yaml:"log_prune_batch_size"`
+	StatsRetentionDays       int `yaml:"stats_retention_days"`
+	MaxLinkAttributes        int `yaml:"max_link_attributes"`
+	MaxAttributeKeyLength    int `yaml:"max_attribute_key_length"`
+	MaxAttributeValueLength  int `yaml:"max_attribute_value_length"`
+}
+
+type Logging struct {
+	MaxSizeMB  int  `yaml:"max_size_mb"`
+	MaxBackups int  `yaml:"max_backups"`
+	MaxAgeDays int  `yaml:"max_age_days"`
+	Compress   bool `yaml:"compress"`
 }
 
 // AppName is the directory name (relative to the user home directory) that
@@ -70,7 +89,18 @@ func Default() Config {
 		DB:         DB{Path: dbPath},
 		Aggregator: Aggregator{IntervalSeconds: 60},
 		Admin:      Admin{Token: ""},
+		Storage: Storage{RequestLogsRetentionDays: 7, MaxDatabaseSizeMB: 1024, LogPruneBatchSize: 1000,
+			StatsRetentionDays: 365, MaxLinkAttributes: 16, MaxAttributeKeyLength: 64, MaxAttributeValueLength: 256},
+		Logging: Logging{MaxSizeMB: 50, MaxBackups: 7, MaxAgeDays: 7, Compress: true},
 	}
+}
+
+// ResolvePath returns the effective config path without creating the file.
+func ResolvePath(path string) (string, error) {
+	if path != "" {
+		return path, nil
+	}
+	return DefaultConfigPath()
 }
 
 // Load resolves the configuration.
@@ -118,10 +148,33 @@ func Load(path string) (Config, error) {
 }
 
 func writeDefault(path string) error {
-	c := Default()
-	b, err := yaml.Marshal(c)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, b, 0o644)
+	return os.WriteFile(path, []byte(defaultConfigYAML), 0o600)
 }
+
+const defaultConfigYAML = `# UmbraGate configuration. This file is created on first startup.
+server:
+  addr: ":8787" # Use 127.0.0.1:8787 to bind only locally.
+db:
+  path: "" # Empty uses ~/.umbragate/umbragate.db.
+aggregator:
+  interval_seconds: 60 # Hourly statistics aggregation interval; 0 disables the loop.
+admin:
+  token: "" # Set a long random token before exposing the admin UI outside localhost.
+
+# Data retention and capacity controls. Zero disables a retention setting.
+storage:
+  request_logs_retention_days: 7 # Raw request audit log retention.
+  max_database_size_mb: 1024 # At this size the oldest request logs are pruned.
+  log_prune_batch_size: 1000 # Number of oldest request logs deleted for a size prune.
+  stats_retention_days: 365 # Aggregated hourly statistics retention.
+  max_link_attributes: 16 # Maximum configured statistics dimensions per Link.
+  max_attribute_key_length: 64 # Maximum characters in an attribute key.
+  max_attribute_value_length: 256 # Maximum characters in a serialized attribute value.
+
+# Used by ` + "`umbragate start`" + `. Logs are at ~/.umbragate/umbragate.log.
+logging:
+  max_size_mb: 50 # Rotate when the active log reaches this size.
+  max_backups: 7 # Keep at most this many rotated files.
+  max_age_days: 7 # Delete rotated files older than this many days.
+  compress: true # Gzip rotated files.
+`

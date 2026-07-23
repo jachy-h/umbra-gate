@@ -4,18 +4,30 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jachy-h/llm-gateway-lite/internal/config"
 	"github.com/jachy-h/llm-gateway-lite/internal/db"
 	"github.com/jachy-h/llm-gateway-lite/internal/models"
 )
 
 type Service struct {
-	DB *db.DB
+	DB             *db.DB
+	Storage        config.Storage
+	mu             sync.Mutex
+	lastLogPrune   time.Time
+	lastStatsPrune time.Time
 }
 
-func New(d *db.DB) *Service { return &Service{DB: d} }
+func New(d *db.DB, storage ...config.Storage) *Service {
+	s := &Service{DB: d, Storage: config.Default().Storage}
+	if len(storage) > 0 {
+		s.Storage = storage[0]
+	}
+	return s
+}
 
 // Record writes a request log synchronously. Failures are logged but do not
 // propagate to the caller so request handling stays unaffected.
@@ -28,6 +40,33 @@ func (s *Service) Record(l models.RequestLog) {
 	}
 	if err := s.DB.InsertLog(l); err != nil {
 		log.Printf("stats: record log: %v", err)
+		return
+	}
+	s.enforceRequestLogPolicy()
+}
+
+func (s *Service) enforceRequestLogPolicy() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	if s.Storage.RequestLogsRetentionDays > 0 && (s.lastLogPrune.IsZero() || now.Sub(s.lastLogPrune) >= 24*time.Hour) {
+		if err := s.DB.DeleteRequestLogsBefore(now.AddDate(0, 0, -s.Storage.RequestLogsRetentionDays)); err != nil {
+			log.Printf("stats: prune request logs: %v", err)
+		} else {
+			s.lastLogPrune = now
+		}
+	}
+	if s.Storage.MaxDatabaseSizeMB > 0 {
+		size, err := s.DB.DatabaseSize()
+		if err != nil {
+			log.Printf("stats: database size: %v", err)
+			return
+		}
+		if size >= int64(s.Storage.MaxDatabaseSizeMB)*1024*1024 {
+			if _, err := s.DB.PruneOldestRequestLogs(s.Storage.LogPruneBatchSize); err != nil {
+				log.Printf("stats: enforce database limit: %v", err)
+			}
+		}
 	}
 }
 
@@ -98,7 +137,25 @@ func (s *Service) Aggregate(ctx context.Context) error {
 			return err
 		}
 	}
+	s.pruneStats(end)
 	return s.DB.SetMeta("last_aggregated_at", end.Format(time.RFC3339Nano))
+}
+
+func (s *Service) pruneStats(now time.Time) {
+	if s.Storage.StatsRetentionDays <= 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.lastStatsPrune.IsZero() && now.Sub(s.lastStatsPrune) < 24*time.Hour {
+		return
+	}
+	cutoff := now.AddDate(0, 0, -s.Storage.StatsRetentionDays).UTC().Format("2006-01-02T15")
+	if err := s.DB.DeleteAggregatedBefore(cutoff); err != nil {
+		log.Printf("stats: prune aggregates: %v", err)
+		return
+	}
+	s.lastStatsPrune = now
 }
 
 func toStr(v any) string {

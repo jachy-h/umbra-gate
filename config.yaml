@@ -6,3 +6,20 @@ aggregator:
   interval_seconds: 60
 admin:
   token: ""  # 设置后 /admin/* 路由要求 X-Admin-Token 或 Authorization: Bearer
+
+# 数据保留与容量控制。request_logs 保存原始请求审计，过期后会自动删除。
+storage:
+  request_logs_retention_days: 7  # 设为 0 可关闭按日期清理
+  max_database_size_mb: 1024      # 超过此容量时，删除最旧的 log_prune_batch_size 条请求日志
+  log_prune_batch_size: 1000      # 每次容量清理删除的最旧请求日志数
+  stats_retention_days: 365       # 小时聚合统计的保留天数；设为 0 可关闭
+  max_link_attributes: 16         # 每个 Link 最多可配置的统计属性数
+  max_attribute_key_length: 64    # 统计属性键最大字符数
+  max_attribute_value_length: 256 # 统计属性值序列化后的最大字符数
+
+# 仅后台 `umbragate start` 使用。日志位于 ~/.umbragate/umbragate.log，按日期或大小轮转。
+logging:
+  max_size_mb: 50
+  max_backups: 7
+  max_age_days: 7
+  compress: true

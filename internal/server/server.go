@@ -19,9 +19,9 @@ func New(cfg config.Config, d *db.DB) (*gin.Engine, *stats.Service) {
 	r := gin.New()
 	r.Use(gin.Recovery(), gin.Logger())
 
-	statSvc := stats.New(d)
+	statSvc := stats.New(d, cfg.Storage)
 	fwd := &proxy.Forwarder{DB: d, Stats: statSvc}
-	admin := &api.AdminAPI{DB: d, Forwarder: fwd, StatsService: statSvc}
+	admin := &api.AdminAPI{DB: d, Forwarder: fwd, StatsService: statSvc, AttributeLimits: cfg.Storage}
 	prox := &api.ProxyAPI{DB: d, Forwarder: fwd}
 
 	adminAuth := func(c *gin.Context) {

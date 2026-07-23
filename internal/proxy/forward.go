@@ -41,7 +41,9 @@ func (f *Forwarder) HandleRequest(w http.ResponseWriter, r *http.Request, link m
 	}
 	body, _ := io.ReadAll(r.Body)
 	origModel := extractModel(body)
-	attributes := parseAttrMerge(link, r.Header)
+	// Statistics dimensions are owned by the Link configuration. Do not accept
+	// caller-supplied dimensions: they make cardinality and storage unbounded.
+	attributes := link.Attributes
 	requestURL := inboundRequestURL(r)
 	requestHeaders := redactHTTPHeaders(r.Header)
 
@@ -617,22 +619,4 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_, _ = w.Write(b)
-}
-
-// parseAttrMerge reads attributes from an optional request header (JSON) and
-// merges them onto the link's configured attributes; returns merged map.
-func parseAttrMerge(link models.ProxyLink, header http.Header) models.Map {
-	merged := models.Map{}
-	for k, v := range link.Attributes {
-		merged[k] = v
-	}
-	if h := header.Get("X-Gateway-Attributes"); h != "" {
-		var extra models.Map
-		if err := json.Unmarshal([]byte(h), &extra); err == nil {
-			for k, v := range extra {
-				merged[k] = v
-			}
-		}
-	}
-	return merged
 }

@@ -2,13 +2,16 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"github.com/jachy-h/llm-gateway-lite/internal/config"
 	"github.com/jachy-h/llm-gateway-lite/internal/db"
 	"github.com/jachy-h/llm-gateway-lite/internal/models"
 	"github.com/jachy-h/llm-gateway-lite/internal/providers"
@@ -17,9 +20,10 @@ import (
 )
 
 type AdminAPI struct {
-	DB           *db.DB
-	Forwarder    *proxy.Forwarder
-	StatsService *stats.Service
+	DB              *db.DB
+	Forwarder       *proxy.Forwarder
+	StatsService    *stats.Service
+	AttributeLimits config.Storage
 }
 
 func newPathToken() string {
@@ -154,6 +158,10 @@ func (a *AdminAPI) CreateLink(c *gin.Context) {
 	if l.Attributes == nil {
 		l.Attributes = models.Map{}
 	}
+	if err := validateLinkAttributes(l.Attributes, a.AttributeLimits); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	if l.CreatedAt.IsZero() {
 		l.CreatedAt = time.Now()
 	}
@@ -214,6 +222,25 @@ func (a *AdminAPI) CreateLink(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusCreated, l)
+}
+
+func validateLinkAttributes(attributes models.Map, limits config.Storage) error {
+	if limits.MaxLinkAttributes > 0 && len(attributes) > limits.MaxLinkAttributes {
+		return fmt.Errorf("attributes exceed maximum of %d", limits.MaxLinkAttributes)
+	}
+	for key, value := range attributes {
+		if key == "" || (limits.MaxAttributeKeyLength > 0 && utf8.RuneCountInString(key) > limits.MaxAttributeKeyLength) {
+			return fmt.Errorf("invalid attribute key %q", key)
+		}
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return fmt.Errorf("invalid attribute %q: %w", key, err)
+		}
+		if limits.MaxAttributeValueLength > 0 && utf8.RuneCountInString(string(encoded)) > limits.MaxAttributeValueLength {
+			return fmt.Errorf("attribute %q exceeds maximum value length of %d", key, limits.MaxAttributeValueLength)
+		}
+	}
+	return nil
 }
 
 func supportedProtocol(protocol string) bool {
