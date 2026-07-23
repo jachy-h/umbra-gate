@@ -212,7 +212,7 @@ func decMap(s string) models.Map {
 }
 
 func (d *DB) seed() error {
-	const providerSeedVersion = "2026-07-23"
+	const providerSeedVersion = "2026-07-23-minimal-builtins"
 
 	type seedProvider struct {
 		id      string
@@ -222,49 +222,11 @@ func (d *DB) seed() error {
 		models  []string
 	}
 	builtins := []seedProvider{
-		{id: "openai", name: "OpenAI", typ: "openai", baseURL: "https://api.openai.com/v1",
-			models: []string{"gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "o4-mini", "o3-mini"}},
-		{id: "anthropic", name: "Anthropic", typ: "anthropic", baseURL: "https://api.anthropic.com",
-			models: []string{"claude-opus-4-20250514", "claude-sonnet-4-20250514", "claude-3.5-haiku"}},
-		{id: "google", name: "Gemini", typ: "gemini", baseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
-			models: []string{"gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"}},
-		{id: "deepseek", name: "DeepSeek", typ: "deepseek", baseURL: "https://api.deepseek.com/v1",
+		{id: "deepseek", name: "DeepSeek", typ: "deepseek", baseURL: "https://api.deepseek.com",
 			models: []string{"deepseek-chat", "deepseek-reasoner"}},
-		{id: "qwen", name: "Qwen", typ: "qwen", baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-			models: []string{"qwen-plus", "qwen-max", "qwen-turbo"}},
-		{id: "xai", name: "xAI", typ: "custom", baseURL: "https://api.x.ai/v1",
-			models: []string{"grok-4", "grok-3", "grok-3-mini"}},
-		{id: "groq", name: "Groq", typ: "custom", baseURL: "https://api.groq.com/openai/v1",
-			models: []string{"llama-4-scout-17b-16e-instruct"}},
-		{id: "cerebras", name: "Cerebras", typ: "custom", baseURL: "https://api.cerebras.ai/v1",
-			models: []string{"llama-4-scout-17b-16e-instruct", "llama-3.3-70b"}},
-		{id: "deepinfra", name: "DeepInfra", typ: "custom", baseURL: "https://api.deepinfra.com/v1/openai",
-			models: []string{"meta-llama/Meta-Llama-3.1-405B-Instruct"}},
-		{id: "together", name: "Together AI", typ: "custom", baseURL: "https://api.together.xyz/v1",
-			models: []string{"meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8"}},
-		{id: "fireworks", name: "Fireworks AI", typ: "custom", baseURL: "https://api.fireworks.ai/inference/v1",
-			models: []string{"accounts/fireworks/models/llama4-maverick-instruct-basic"}},
-		{id: "openrouter", name: "OpenRouter", typ: "custom", baseURL: "https://openrouter.ai/api/v1",
-			models: []string{"openai/gpt-4o", "anthropic/claude-sonnet-4"}},
-		{id: "github-copilot", name: "GitHub Copilot", typ: "custom", baseURL: "https://api.githubcopilot.com",
-			models: []string{"gpt-4o", "claude-sonnet-4"}},
-		{id: "moonshot", name: "Moonshot", typ: "custom", baseURL: "https://api.moonshot.cn/v1",
-			models: []string{"moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"}},
-		{id: "minimax", name: "MiniMax", typ: "custom", baseURL: "https://api.minimaxi.com/v1",
-			models: []string{"abab6.5s-chat", "abab7-chat"}},
-		{id: "vercel", name: "Vercel AI", typ: "custom", baseURL: "https://api.ai.vercel.com/v1",
-			models: []string{"gpt-4o", "claude-sonnet-4"}},
-		{id: "volcengine", name: "Volcengine", typ: "custom", baseURL: "https://ark.cn-beijing.volces.com/api/coding/v3",
-			models: []string{"deepseek-r1-250528", "deepseek-v3-250324"}},
-		{id: "helicone", name: "Helicone", typ: "custom", baseURL: "https://ai-gateway.helicone.ai",
+		{id: "opencode", name: "OpenCode", typ: "opencode", baseURL: "https://opencode.ai/zen/v1/responses",
 			models: []string{}},
-		{id: "huggingface", name: "HuggingFace", typ: "custom", baseURL: "https://api-inference.huggingface.co/v1",
-			models: []string{}},
-		{id: "cloudflare-ai-gateway", name: "Cloudflare AI", typ: "custom", baseURL: "https://gateway.ai.cloudflare.com/v1/{ACCOUNT_ID}/{GATEWAY_ID}",
-			models: []string{}},
-		{id: "opencode", name: "OpenCode", typ: "opencode", baseURL: "https://opencode.ai/zen/v1",
-			models: []string{}},
-		{id: "opencode-go", name: "OpenCode Go", typ: "opencode", baseURL: "https://opencode.ai/zen/go/v1",
+		{id: "opencode-go", name: "OpenCode Go", typ: "opencode", baseURL: "https://opencode.ai/zen/go/v1/responses",
 			models: []string{}},
 	}
 
@@ -273,23 +235,17 @@ func (d *DB) seed() error {
 		return err
 	}
 	if currentSeedVersion != providerSeedVersion {
-		if _, err := d.Exec(`DELETE FROM providers`); err != nil {
+		if _, err := d.Exec(`DELETE FROM providers WHERE builtin=1`); err != nil {
 			return err
 		}
 	}
 	for _, p := range builtins {
 		provider := models.Provider{ID: p.id, Name: p.name, Type: p.typ, BaseURL: p.baseURL}
 		endpoints := normalizeProviderEndpoints(provider)
-		if p.id == "openai" {
+		if p.id == "deepseek" {
 			endpoints = append(endpoints, models.ProviderEndpoint{
-				Protocol: models.ProtocolOpenAI, RequestFormat: models.FormatResponses,
-				ResponseFormat: models.FormatResponses, BaseURL: "https://api.openai.com/v1/responses",
-			})
-		}
-		if p.id == "openrouter" {
-			endpoints = append(endpoints, models.ProviderEndpoint{
-				Protocol: models.ProtocolOpenAI, RequestFormat: models.FormatResponses,
-				ResponseFormat: models.FormatResponses, BaseURL: "https://openrouter.ai/api/v1/responses",
+				Protocol: models.ProtocolAnthropic, RequestFormat: models.FormatMessages,
+				ResponseFormat: models.FormatMessages, BaseURL: "https://api.deepseek.com/anthropic",
 			})
 		}
 		if _, err := d.Exec(`INSERT OR IGNORE INTO providers(id,name,type,base_url,endpoints_json,api_key,models_json,extra_json,enabled,builtin,created_at)
@@ -357,22 +313,18 @@ func (d *DB) backfillProviderEndpoints() error {
 				}
 			}
 		}
-		if item.id == "openai" || item.id == "openrouter" {
+		if item.id == "deepseek" {
 			found := false
 			for _, endpoint := range endpoints {
-				if endpoint.Protocol == models.ProtocolOpenAI && endpoint.ResponseFormat == models.FormatResponses {
+				if endpoint.Protocol == models.ProtocolAnthropic && endpoint.ResponseFormat == models.FormatMessages {
 					found = true
 					break
 				}
 			}
 			if !found {
-				baseURL := "https://api.openai.com/v1/responses"
-				if item.id == "openrouter" {
-					baseURL = "https://openrouter.ai/api/v1/responses"
-				}
 				endpoints = append(endpoints, models.ProviderEndpoint{
-					Protocol: models.ProtocolOpenAI, RequestFormat: models.FormatResponses,
-					ResponseFormat: models.FormatResponses, BaseURL: baseURL,
+					Protocol: models.ProtocolAnthropic, RequestFormat: models.FormatMessages,
+					ResponseFormat: models.FormatMessages, BaseURL: "https://api.deepseek.com/anthropic",
 				})
 			}
 		}

@@ -32,7 +32,7 @@ umbragate start
 或从源码构建：`make && ./umbragate`（需要 Go + Node.js）。
 
 1. 打开 **http://localhost:8787** — 内置 Web 控制台。
-2. 添加你的 Provider（OpenAI、Anthropic、DeepSeek 等），填入 API Key。
+2. DeepSeek、OpenCode 和 OpenCode Go 已预置；填入 API Key，或按需创建其他 Provider。
 3. 创建代理链接，按优先级堆叠 Provider，配置故障切换规则。
 4. 复制链接 URL，填入你喜欢的 AI 客户端 —— OpenCode、Cursor、ChatGPT 客户端，或任何 OpenAI 兼容工具。
 
@@ -57,7 +57,7 @@ umbragate run
 umbragate --help
 ```
 
-`start` 在后台运行，`run` 在前台运行，两种模式默认都使用 `~/.umbragate/config.yaml`。自定义配置可使用 `umbragate start -config /path/to/config.yaml`、`umbragate restart -config /path/to/config.yaml` 或 `umbragate run -config /path/to/config.yaml`。运行时文件位于 `~/.umbragate/`：`umbragate.pid` 记录后台进程，`umbragate.log` 保存输出。不带命令执行 `umbragate` 等同于 `umbragate run`。
+`start` 在后台运行，`run` 在前台运行。后台启动后，`start` 和 `status` 会显示 Web UI URL，可直接从终端打开。两种模式默认都使用 `~/.umbragate/config.yaml`。自定义配置可使用 `umbragate start -config /path/to/config.yaml`、`umbragate restart -config /path/to/config.yaml` 或 `umbragate run -config /path/to/config.yaml`。运行时文件位于 `~/.umbragate/`：`umbragate.pid` 记录后台进程，`umbragate.url` 记录 Web UI URL，`umbragate.log` 保存输出。不带命令执行 `umbragate` 等同于 `umbragate run`。
 
 ---
 

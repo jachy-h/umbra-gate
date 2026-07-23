@@ -32,7 +32,7 @@ umbragate start
 Or build from source: `make && ./umbragate` (requires Go + Node.js).
 
 1. Open **http://localhost:8787** — the built-in web console.
-2. Add your providers (OpenAI, Anthropic, DeepSeek, …) with their API keys.
+2. DeepSeek, OpenCode, and OpenCode Go are preconfigured. Add API keys or create any additional providers you need.
 3. Create a proxy link, stack providers in priority order, set fallback rules.
 4. Copy the link's URL and paste it into your favorite AI client — OpenCode, Cursor, ChatGPT client, or any OpenAI-compatible tool.
 
@@ -57,7 +57,7 @@ umbragate run
 umbragate --help
 ```
 
-`start` runs in the background; `run` runs in the foreground. Both modes use `~/.umbragate/config.yaml` by default. Pass a custom configuration with `umbragate start -config /path/to/config.yaml`, `umbragate restart -config /path/to/config.yaml`, or `umbragate run -config /path/to/config.yaml`. Runtime files are stored in `~/.umbragate/`: `umbragate.pid` records the background process and `umbragate.log` contains its output. Running `umbragate` without a command is equivalent to `umbragate run`.
+`start` runs in the background; `run` runs in the foreground. After a background start, `start` and `status` display the Web UI URL so it can be opened directly from the terminal. Both modes use `~/.umbragate/config.yaml` by default. Pass a custom configuration with `umbragate start -config /path/to/config.yaml`, `umbragate restart -config /path/to/config.yaml`, or `umbragate run -config /path/to/config.yaml`. Runtime files are stored in `~/.umbragate/`: `umbragate.pid` records the background process, `umbragate.url` records its Web UI URL, and `umbragate.log` contains its output. Running `umbragate` without a command is equivalent to `umbragate run`.
 
 ---
 

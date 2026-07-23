@@ -3,6 +3,8 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +19,7 @@ import (
 const (
 	pidFileName = "umbragate.pid"
 	logFileName = "umbragate.log"
+	urlFileName = "umbragate.url"
 )
 
 func runtimePaths() (pidPath, logPath string, err error) {
@@ -69,6 +72,7 @@ func startDaemon(configPath string) error {
 	if err != nil {
 		return err
 	}
+	urlPath := filepath.Join(filepath.Dir(pidPath), urlFileName)
 	pid, err := activePID(pidPath)
 	if err != nil {
 		return err
@@ -78,8 +82,13 @@ func startDaemon(configPath string) error {
 	}
 
 	// Load once before spawning so invalid configuration fails synchronously.
-	if _, err := config.Load(configPath); err != nil {
+	cfg, err := config.Load(configPath)
+	if err != nil {
 		return fmt.Errorf("load config: %w", err)
+	}
+	webURL, err := browserURL(cfg.Server.Addr)
+	if err != nil {
+		return fmt.Errorf("resolve web URL: %w", err)
 	}
 
 	executable, err := os.Executable()
@@ -110,7 +119,12 @@ func startDaemon(configPath string) error {
 		_ = cmd.Process.Signal(syscall.SIGTERM)
 		return fmt.Errorf("write PID file: %w", err)
 	}
-	fmt.Printf("%s started in the background (PID %d)\nlog: %s\n", appName, cmd.Process.Pid, logPath)
+	if err := os.WriteFile(urlPath, []byte(webURL+"\n"), 0o644); err != nil {
+		_ = cmd.Process.Signal(syscall.SIGTERM)
+		_ = os.Remove(pidPath)
+		return fmt.Errorf("write URL file: %w", err)
+	}
+	printRunningStatus(os.Stdout, cmd.Process.Pid, webURL, logPath)
 	return nil
 }
 
@@ -119,11 +133,13 @@ func stopDaemon() error {
 	if err != nil {
 		return err
 	}
+	urlPath := filepath.Join(filepath.Dir(pidPath), urlFileName)
 	pid, err := activePID(pidPath)
 	if err != nil {
 		return err
 	}
 	if pid == 0 {
+		_ = os.Remove(urlPath)
 		fmt.Printf("%s is not running\n", appName)
 		return nil
 	}
@@ -145,6 +161,9 @@ func stopDaemon() error {
 	if err := os.Remove(pidPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	if err := os.Remove(urlPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	fmt.Printf("%s stopped\n", appName)
 	return nil
 }
@@ -154,14 +173,61 @@ func daemonStatus() error {
 	if err != nil {
 		return err
 	}
+	urlPath := filepath.Join(filepath.Dir(pidPath), urlFileName)
 	pid, err := activePID(pidPath)
 	if err != nil {
 		return err
 	}
 	if pid == 0 {
+		_ = os.Remove(urlPath)
 		fmt.Printf("%s is not running\n", appName)
 		return nil
 	}
-	fmt.Printf("%s is running (PID %d)\nlog: %s\n", appName, pid, logPath)
+	webURL, err := readDaemonURL(urlPath)
+	if err != nil {
+		return err
+	}
+	printRunningStatus(os.Stdout, pid, webURL, logPath)
 	return nil
+}
+
+func browserURL(addr string) (string, error) {
+	host, port, err := net.SplitHostPort(strings.TrimSpace(addr))
+	if err != nil {
+		return "", fmt.Errorf("invalid server address %q: %w", addr, err)
+	}
+	switch host {
+	case "", "0.0.0.0", "::":
+		host = "localhost"
+	}
+	return "http://" + net.JoinHostPort(host, port), nil
+}
+
+func readDaemonURL(urlPath string) (string, error) {
+	b, err := os.ReadFile(urlPath)
+	if err == nil {
+		if webURL := strings.TrimSpace(string(b)); webURL != "" {
+			return webURL, nil
+		}
+	}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("read URL file: %w", err)
+	}
+
+	// Processes started by older versions do not have a URL file. Use the
+	// default configuration as a backwards-compatible fallback.
+	cfg, err := config.Load("")
+	if err != nil {
+		return "", fmt.Errorf("load config: %w", err)
+	}
+	return browserURL(cfg.Server.Addr)
+}
+
+func printRunningStatus(w io.Writer, pid int, webURL, logPath string) {
+	fmt.Fprintln(w, "╭─ UmbraGate")
+	fmt.Fprintln(w, "│  Status  ● Running")
+	fmt.Fprintf(w, "│  Web UI  %s\n", webURL)
+	fmt.Fprintf(w, "│  PID     %d\n", pid)
+	fmt.Fprintf(w, "│  Logs    %s\n", logPath)
+	fmt.Fprintln(w, "╰─")
 }

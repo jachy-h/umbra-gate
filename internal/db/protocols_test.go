@@ -7,34 +7,24 @@ import (
 	"github.com/jachy-h/llm-gateway-lite/internal/models"
 )
 
-func TestOpenRouterSeedSupportsChatAndResponsesProtocols(t *testing.T) {
+func TestProviderSeedsIncludeOnlyDeepSeekAndOpenCode(t *testing.T) {
 	database, err := Open(filepath.Join(t.TempDir(), "gateway.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer database.Close()
 
-	provider, err := database.GetProvider("openrouter")
+	providers, err := database.ListProviders()
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{
-		models.FormatChatCompletions: "https://openrouter.ai/api/v1",
-		models.FormatResponses:       "https://openrouter.ai/api/v1/responses",
+	if len(providers) != 3 {
+		t.Fatalf("provider count = %d, want 3", len(providers))
 	}
-	for _, endpoint := range provider.Endpoints {
-		if endpoint.Protocol != models.ProtocolOpenAI {
-			t.Fatalf("OpenRouter endpoint protocol = %q", endpoint.Protocol)
+	for _, provider := range providers {
+		if !provider.Builtin || (provider.ID != "deepseek" && provider.ID != "opencode" && provider.ID != "opencode-go") {
+			t.Fatalf("unexpected built-in provider: %+v", provider)
 		}
-		if expected, exists := want[endpoint.ResponseFormat]; exists {
-			if endpoint.BaseURL != expected {
-				t.Fatalf("%s URL = %q, want %q", endpoint.ResponseFormat, endpoint.BaseURL, expected)
-			}
-			delete(want, endpoint.ResponseFormat)
-		}
-	}
-	if len(want) != 0 {
-		t.Fatalf("missing OpenRouter protocol endpoints: %v", want)
 	}
 }
 
@@ -56,31 +46,55 @@ func TestOpenCodeGoSeedDeclaresAsymmetricOpenAIEndpoint(t *testing.T) {
 	if endpoint.Protocol != models.ProtocolOpenAI ||
 		endpoint.RequestFormat != models.FormatChatCompletions ||
 		endpoint.ResponseFormat != models.FormatResponses ||
-		endpoint.BaseURL != "https://opencode.ai/zen/go/v1" {
+		endpoint.BaseURL != "https://opencode.ai/zen/go/v1/responses" {
 		t.Fatalf("OpenCode Go endpoint contract = %+v", endpoint)
 	}
 }
 
-func TestProviderSeedsUseCurrentCCSwitchEndpoints(t *testing.T) {
+func TestDeepSeekSeedSupportsOpenAIAndAnthropicProtocols(t *testing.T) {
 	database, err := Open(filepath.Join(t.TempDir(), "gateway.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer database.Close()
 
-	want := map[string]string{
-		"qwen":     "https://dashscope.aliyuncs.com/compatible-mode/v1",
-		"minimax":  "https://api.minimaxi.com/v1",
-		"opencode": "https://opencode.ai/zen/v1",
+	provider, err := database.GetProvider("deepseek")
+	if err != nil {
+		t.Fatal(err)
 	}
-	for id, baseURL := range want {
-		provider, err := database.GetProvider(id)
-		if err != nil {
-			t.Fatalf("GetProvider(%q): %v", id, err)
+	if provider.BaseURL != "https://api.deepseek.com" {
+		t.Fatalf("DeepSeek base URL = %q", provider.BaseURL)
+	}
+	want := map[string]string{
+		models.ProtocolOpenAI:    "https://api.deepseek.com",
+		models.ProtocolAnthropic: "https://api.deepseek.com/anthropic",
+	}
+	for _, endpoint := range provider.Endpoints {
+		if expected, exists := want[endpoint.Protocol]; exists {
+			if endpoint.BaseURL != expected {
+				t.Fatalf("DeepSeek %s URL = %q, want %q", endpoint.Protocol, endpoint.BaseURL, expected)
+			}
+			delete(want, endpoint.Protocol)
 		}
-		if provider.BaseURL != baseURL || len(provider.Endpoints) == 0 || provider.Endpoints[0].BaseURL != baseURL {
-			t.Fatalf("%s endpoint = provider=%q endpoints=%+v, want %q", id, provider.BaseURL, provider.Endpoints, baseURL)
-		}
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing DeepSeek protocol endpoints: %v", want)
+	}
+}
+
+func TestOpenCodeSeedUsesResponsesEndpoint(t *testing.T) {
+	database, err := Open(filepath.Join(t.TempDir(), "gateway.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	provider, err := database.GetProvider("opencode")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.BaseURL != "https://opencode.ai/zen/v1/responses" || len(provider.Endpoints) != 1 || provider.Endpoints[0].BaseURL != provider.BaseURL {
+		t.Fatalf("OpenCode endpoint = provider=%q endpoints=%+v", provider.BaseURL, provider.Endpoints)
 	}
 }
 
@@ -96,6 +110,9 @@ func TestProviderSeedResetRunsOnlyOncePerSeedVersion(t *testing.T) {
 	if _, err := database.Exec(`INSERT INTO providers(id,name,type,base_url,endpoints_json) VALUES('old','Old','custom','https://old.example/v1','[]')`); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := database.Exec(`INSERT INTO providers(id,name,type,base_url,endpoints_json,builtin) VALUES('old-builtin','Old Built-in','custom','https://old-builtin.example/v1','[]',1)`); err != nil {
+		t.Fatal(err)
+	}
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -104,8 +121,11 @@ func TestProviderSeedResetRunsOnlyOncePerSeedVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.GetProvider("old"); err != ErrNotFound {
-		t.Fatalf("stale provider lookup error = %v, want ErrNotFound", err)
+	if _, err := database.GetProvider("old"); err != nil {
+		t.Fatalf("custom provider lookup error = %v, want nil", err)
+	}
+	if _, err := database.GetProvider("old-builtin"); err != ErrNotFound {
+		t.Fatalf("removed built-in provider lookup error = %v, want ErrNotFound", err)
 	}
 	if _, err := database.Exec(`INSERT INTO providers(id,name,type,base_url,endpoints_json) VALUES('custom','Custom','custom','https://custom.example/v1','[]')`); err != nil {
 		t.Fatal(err)
@@ -121,23 +141,5 @@ func TestProviderSeedResetRunsOnlyOncePerSeedVersion(t *testing.T) {
 	defer database.Close()
 	if _, err := database.GetProvider("custom"); err != nil {
 		t.Fatalf("custom provider lookup error = %v, want nil", err)
-	}
-}
-
-func TestGeminiSeedUsesOpenAICompatibleEndpoint(t *testing.T) {
-	database, err := Open(filepath.Join(t.TempDir(), "gateway.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer database.Close()
-
-	provider, err := database.GetProvider("google")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(provider.Endpoints) != 1 ||
-		provider.Endpoints[0].Protocol != models.ProtocolOpenAI ||
-		provider.Endpoints[0].BaseURL != "https://generativelanguage.googleapis.com/v1beta/openai" {
-		t.Fatalf("Gemini OpenAI-compatible endpoint = %+v", provider.Endpoints)
 	}
 }
