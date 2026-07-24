@@ -45,6 +45,9 @@ type ChainEntry struct {
 	ValidationOK    *bool     `json:"validation_ok,omitempty"`
 	ValidationError string    `json:"validation_error,omitempty"`
 	ValidatedAt     time.Time `json:"validated_at,omitempty"`
+	// SupportedFormats is discovered by validation probes, rather than inferred
+	// from a provider type or a manually declared endpoint shape.
+	SupportedFormats []string `json:"supported_formats,omitempty"`
 }
 
 type Rules struct {
@@ -54,14 +57,17 @@ type Rules struct {
 }
 
 type ProxyLink struct {
-	ID         string       `json:"id"`
-	Name       string       `json:"name"`
-	Path       string       `json:"path"` // proxy url token
-	Protocol   string       `json:"protocol"`
-	Attributes Map          `json:"attributes"` // for stats grouping
-	Chain      []ChainEntry `json:"chain"`
-	Enabled    bool         `json:"enabled"`
-	CreatedAt  time.Time    `json:"created_at"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Path     string `json:"path"` // proxy url token
+	Protocol string `json:"protocol"`
+	// SupportedFormats is the intersection of every chain entry's discovered
+	// formats. It tells callers which operation URLs this Link can serve.
+	SupportedFormats []string     `json:"supported_formats,omitempty"`
+	Attributes       Map          `json:"attributes"` // for stats grouping
+	Chain            []ChainEntry `json:"chain"`
+	Enabled          bool         `json:"enabled"`
+	CreatedAt        time.Time    `json:"created_at"`
 }
 
 type RequestLog struct {

@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
-import type { Provider, ProxyLink, ChainEntry, ProviderProtocol } from '../types'
+import type { Provider, ProxyLink, ChainEntry } from '../types'
 import { Button } from '../components/Button'
 import { Input } from '../components/Input'
 import { SearchableSelect } from '../components/SearchableSelect'
 import { Spinner } from '../components/Spinner'
-import { protocolLabel } from '../protocols'
 
 const blankChainEntry = (): ChainEntry => ({ provider_id: '', protocol: '', retry_count: 1, fallback_model: '', api_key: '' })
 
@@ -35,7 +34,7 @@ export function LinkEditor({ link, onSaved, onCancel }: Props) {
         setPath(link.path)
         setEnabled(link.enabled)
         setChain(link.chain?.length
-          ? link.chain.map((entry, index) => ({ ...entry, protocol: entry.protocol || (index === 0 ? link.protocol : '') }))
+          ? link.chain.map((entry) => ({ ...entry, protocol: entry.protocol || '' }))
           : [blankChainEntry()])
       } else {
         setChain([blankChainEntry()])
@@ -66,27 +65,16 @@ export function LinkEditor({ link, onSaved, onCancel }: Props) {
 
   const save = async () => {
     if (!chain[0]?.provider_id) {
-      setError('Select a provider for the primary node. Step 1 must define the link protocol.')
+      setError('Select a provider for the primary node.')
       return
     }
     const selectedChain = chain.filter((entry) => entry.provider_id)
-    const selectedProtocol = selectedChain[0]?.protocol || ''
-    const mismatch = selectedChain.findIndex((entry) => !entry.protocol || entry.protocol !== selectedProtocol)
-    if (!selectedProtocol) {
-      setError('Select a protocol on the primary node. The first node defines the link protocol.')
-      return
-    }
-    if (mismatch >= 0) {
-      setError(`Protocol mismatch at chain step ${mismatch + 1}. Every node must use ${protocolLabel(selectedProtocol)}.`)
-      return
-    }
     setSaving(true)
     setError('')
     try {
       const payload: Partial<ProxyLink> = {
         name,
         path: path || undefined,
-        protocol: selectedProtocol as ProviderProtocol,
         chain: selectedChain,
         enabled,
       }
@@ -106,20 +94,9 @@ export function LinkEditor({ link, onSaved, onCancel }: Props) {
   const labelCls = 'text-[11px] font-medium uppercase tracking-wide text-[var(--color-muted)]'
 
   const providerName = (id: string) => providers.find((p) => p.id === id)?.name || id
-  const providerProtocols = (provider?: Provider) => Array.from(new Set((provider?.endpoints || []).map((endpoint) => endpoint.protocol)))
-  const linkProtocol = chain[0]?.protocol || ''
-  const protocolMismatchIndexes = new Set(chain.map((entry, index) => (
-    index > 0 && !!entry.provider_id && (!entry.protocol || entry.protocol !== linkProtocol) ? index : -1
-  )).filter((index) => index >= 0))
-
   const selectProvider = (index: number, providerID: string) => {
-    const provider = providers.find((item) => item.id === providerID)
-    const matchingLinkProtocol = index > 0 && linkProtocol
-      ? provider?.endpoints?.find((endpoint) => endpoint.protocol === linkProtocol)?.protocol
-      : undefined
-    const protocol = matchingLinkProtocol || provider?.endpoints?.[0]?.protocol || ''
     setChain((current) => current.map((entry, entryIndex) => entryIndex === index
-      ? { ...entry, provider_id: providerID, protocol }
+      ? { ...entry, provider_id: providerID, protocol: '' }
       : entry))
   }
 
@@ -172,9 +149,9 @@ export function LinkEditor({ link, onSaved, onCancel }: Props) {
           </div>
 
           <div className="rounded-xl border border-[var(--color-hairline)] bg-[var(--color-canvas)] p-6">
-            <div className="mb-4 rounded-lg border-2 border-[var(--color-ink)] bg-[var(--color-ink)] px-4 py-3 text-white shadow-sm">
-              <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/60">Link protocol · fixed by step 1</p>
-              <p className="mt-1 text-sm font-semibold">{protocolLabel(linkProtocol)}</p>
+            <div className="mb-4 rounded-lg border border-[var(--color-hairline)] bg-[var(--color-surface-soft)] px-4 py-3">
+              <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--color-muted)]">Automatic capability check</p>
+              <p className="mt-1 text-sm font-semibold text-[var(--color-ink)]">Chat Completions and Responses are verified when you save.</p>
             </div>
             <h3 className="text-sm font-semibold text-[var(--color-ink)] mb-3">Chain Preview</h3>
             {chain.filter(c => c.provider_id).length === 0 ? (
@@ -194,7 +171,6 @@ export function LinkEditor({ link, onSaved, onCancel }: Props) {
                       'bg-[var(--color-badge-orange)] text-white'
                     }`}>
                       {providerName(c.provider_id)}
-                      <span className="ml-1 opacity-70">· {protocolLabel(c.protocol)}</span>
                       {!!c.api_key && ' *'}
                     </span>
                   </span>
@@ -227,9 +203,7 @@ export function LinkEditor({ link, onSaved, onCancel }: Props) {
               const isFirst = i === 0
               const isLast = i === chain.length - 1
               return (
-                <div key={i} className={`relative rounded-xl border bg-[var(--color-canvas)] transition-colors ${
-                  protocolMismatchIndexes.has(i) ? 'border-red-500 shadow-[0_0_0_3px_rgba(239,68,68,0.10)]' : 'border-[var(--color-hairline)]'
-                }`}>
+                <div key={i} className="relative rounded-xl border border-[var(--color-hairline)] bg-[var(--color-canvas)] transition-colors">
                   {/* Header */}
                   <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--color-hairline-soft)]">
                     <div className="flex items-center gap-3">
@@ -243,13 +217,6 @@ export function LinkEditor({ link, onSaved, onCancel }: Props) {
                       <span className="text-sm font-semibold text-[var(--color-ink)]">
                         {isFirst ? 'Primary' : isLast ? 'Final Fallback' : `Fallback #${i}`}
                       </span>
-                      {entry.protocol && (
-                        <span className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-                          protocolMismatchIndexes.has(i) ? 'bg-red-600 text-white' : 'bg-[var(--color-ink)] text-white'
-                        }`}>
-                          {protocolLabel(entry.protocol)}
-                        </span>
-                      )}
                     </div>
                     <div className="flex items-center gap-2">
                       {!isFirst && (
@@ -292,38 +259,22 @@ export function LinkEditor({ link, onSaved, onCancel }: Props) {
                       <div className="flex items-start gap-3 rounded-lg border border-[var(--color-hairline)] bg-[var(--color-surface-soft)] px-4 py-3">
                         <span className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full bg-[var(--color-ink)]" />
                         <div>
-                          <p className="text-xs font-semibold text-[var(--color-ink)]">This node defines the protocol for the entire link.</p>
-                          <p className="mt-0.5 text-xs text-[var(--color-muted)]">Changing it will mark incompatible fallback nodes in red.</p>
+                          <p className="text-xs font-semibold text-[var(--color-ink)]">Protocol and API format are detected automatically.</p>
+                          <p className="mt-0.5 text-xs text-[var(--color-muted)]">Saving probes every node and keeps only formats supported by the full chain.</p>
                         </div>
                       </div>
                     )}
-                    {protocolMismatchIndexes.has(i) && (
-                      <div className="rounded-lg bg-red-600 px-4 py-3 text-sm font-semibold text-white">
-                        Protocol mismatch — this node uses {protocolLabel(entry.protocol)}, while the link requires {protocolLabel(linkProtocol)}. Saving will fail.
-                      </div>
-                    )}
                     <div className="grid grid-cols-12 gap-4">
-                      <div className="col-span-4 space-y-1.5">
+                      <div className="col-span-8 space-y-1.5">
                         <label className={labelCls}>Provider</label>
                         <SearchableSelect
-                          options={providers.map((p) => ({ label: `${p.name} · ${providerProtocols(p).map(protocolLabel).join(' / ')}`, value: p.id }))}
+                          options={providers.map((p) => ({ label: p.name, value: p.id }))}
                           value={entry.provider_id}
                           onChange={(v) => selectProvider(i, v)}
                           placeholder="Search provider..."
                         />
                       </div>
-                      <div className="col-span-3 space-y-1.5">
-                        <label className={labelCls}>{isFirst ? 'Link Protocol' : 'Protocol'}</label>
-                        <SearchableSelect
-                          options={providerProtocols(provider).map((protocol) => ({ label: protocolLabel(protocol), value: protocol }))}
-                          value={entry.protocol}
-                          onChange={(value) => updateChain(i, 'protocol', value)}
-                          disabled={!provider}
-                          placeholder="Select protocol…"
-                          className={protocolMismatchIndexes.has(i) ? '!border-red-500 !text-red-700' : ''}
-                        />
-                      </div>
-                      <div className="col-span-2 space-y-1.5">
+                      <div className="col-span-4 space-y-1.5">
                         <label className={labelCls}>Retry</label>
                         <input
                           type="number"

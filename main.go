@@ -23,12 +23,21 @@ import (
 
 const appName = "umbragate"
 
+// version is set at build time for release binaries with -ldflags "-X main.version=...".
+var version = "dev"
+
 func main() {
 	args := os.Args[1:]
 	if len(args) > 0 {
 		switch args[0] {
 		case "-h", "--help", "help":
 			printUsage(os.Stdout)
+			return
+		case "-v", "--version", "version":
+			if len(args) != 1 {
+				log.Fatal("version does not accept arguments")
+			}
+			printVersion(os.Stdout)
 			return
 		case "start":
 			configPath, err := parseConfigFlag("start", args[1:])
@@ -152,8 +161,14 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  restart           restart the background process")
 	fmt.Fprintln(w, "  status            show background process status")
 	fmt.Fprintln(w, "  run               run in the foreground (default)")
+	fmt.Fprintln(w, "  version           show version information")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Flags:")
 	fmt.Fprintln(w, "  -config string   path to config.yaml (default: ~/.umbragate/config.yaml)")
 	fmt.Fprintln(w, "  -h, --help       show this help")
+	fmt.Fprintln(w, "  -v, --version    show version information")
+}
+
+func printVersion(w io.Writer) {
+	fmt.Fprintf(w, "%s %s\n", appName, version)
 }

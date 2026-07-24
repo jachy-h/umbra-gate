@@ -45,6 +45,40 @@ func TestStatsEndpointAggregatesLatestRequestsOnDemand(t *testing.T) {
 	}
 }
 
+func TestRecentRequestsExcludesLinkTestsAndIncludesProxyRequests(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "gateway.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	service := stats.New(database)
+	service.Record(models.RequestLog{
+		ID: "link-test", LinkID: "link-1", Path: "test", ProviderID: "provider-1", ProviderName: "Provider",
+		StatusCode: http.StatusOK, Success: true, Attributes: models.Map{"_request_type": "link_validation"}, CreatedAt: time.Now(),
+	})
+	service.Record(models.RequestLog{
+		ID: "proxy-request", LinkID: "link-1", Path: "test", ProviderID: "provider-1", ProviderName: "Provider",
+		StatusCode: http.StatusOK, Success: true, CreatedAt: time.Now().Add(time.Millisecond),
+	})
+
+	engine, _ := New(config.Config{}, database)
+	request := httptest.NewRequest(http.MethodGet, "/admin/requests", nil)
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var logs []models.RequestLog
+	if err := json.Unmarshal(response.Body.Bytes(), &logs); err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 1 || logs[0].ID != "proxy-request" {
+		t.Fatalf("recent requests = %+v, want only the proxy request", logs)
+	}
+}
+
 func TestStatsEndpointAggregatesLogsCreatedAfterExistingCursor(t *testing.T) {
 	database, err := db.Open(filepath.Join(t.TempDir(), "gateway.db"))
 	if err != nil {

@@ -96,7 +96,7 @@ jobs:
 
             # Frontend assets built above are embedded at compile time, so the
             # resulting binary is fully self-contained.
-            CGO_ENABLED=0 GOOS=darwin GOARCH="$goarch" go build -trimpath -ldflags="-s -w" -o "$root/umbragate" .
+            CGO_ENABLED=0 GOOS=darwin GOARCH="$goarch" go build -trimpath -ldflags="-s -w -X main.version=$VERSION" -o "$root/umbragate" .
             cp config.yaml "$root/config.yaml"
             tar -C "$root" -czf "dist/${archive}" umbragate config.yaml
           }

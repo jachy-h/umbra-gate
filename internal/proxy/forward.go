@@ -13,6 +13,7 @@ import (
 
 	"github.com/jachy-h/llm-gateway-lite/internal/db"
 	"github.com/jachy-h/llm-gateway-lite/internal/models"
+	conversion "github.com/jachy-h/llm-gateway-lite/internal/protocol"
 	"github.com/jachy-h/llm-gateway-lite/internal/providers"
 	"github.com/jachy-h/llm-gateway-lite/internal/stats"
 )
@@ -39,6 +40,15 @@ func (f *Forwarder) HandleRequest(w http.ResponseWriter, r *http.Request, link m
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("link protocol is %s, request protocol is %s", linkProtocol, requestProtocol))
 		return
 	}
+	// The request URL chooses the client wire format. A Link is protocol-level
+	// routing only, so one OpenAI Link can serve both /chat/completions and
+	// /responses to the same provider chain.
+	linkRequestFormat := requestFormat
+	linkResponseFormat := requestFormat
+	if len(link.SupportedFormats) > 0 && !hasFormat(link.SupportedFormats, requestFormat) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("link does not support %s", requestFormat))
+		return
+	}
 	body, _ := io.ReadAll(r.Body)
 	origModel := extractModel(body)
 	// Statistics dimensions are owned by the Link configuration. Do not accept
@@ -55,6 +65,10 @@ func (f *Forwarder) HandleRequest(w http.ResponseWriter, r *http.Request, link m
 	for i, entry := range chain {
 		if entry.Protocol != "" && linkProtocol != "" && entry.Protocol != linkProtocol {
 			lastErr = fmt.Errorf("chain entry %d protocol %s does not match link protocol %s", i, entry.Protocol, linkProtocol)
+			continue
+		}
+		if len(entry.SupportedFormats) > 0 && !hasFormat(entry.SupportedFormats, requestFormat) {
+			lastErr = fmt.Errorf("provider %s does not support %s", entry.ProviderID, requestFormat)
 			continue
 		}
 		provider, err := f.DB.GetProvider(entry.ProviderID)
@@ -75,9 +89,9 @@ func (f *Forwarder) HandleRequest(w http.ResponseWriter, r *http.Request, link m
 			lastErr = fmt.Errorf("no adapter for type %s and protocol %s", provider.Type, protocol)
 			continue
 		}
-		endpoint, ok := endpointForRequest(provider, protocol, requestFormat)
+		endpoint, ok := endpointForEntry(provider, entry, protocol, linkRequestFormat, linkResponseFormat)
 		if !ok {
-			lastErr = fmt.Errorf("provider %s does not support %s responses over %s style", provider.Name, requestFormat, protocol)
+			lastErr = fmt.Errorf("provider %s has no endpoint convertible from %s to %s", provider.Name, linkRequestFormat, linkResponseFormat)
 			continue
 		}
 		provider.BaseURL = endpointURL(endpoint)
@@ -90,7 +104,7 @@ func (f *Forwarder) HandleRequest(w http.ResponseWriter, r *http.Request, link m
 			if (attempt > 0 || i > 0) && entry.FallbackModel != "" {
 				modelOverride = entry.FallbackModel
 			}
-			upstreamBody, prepareErr := prepareRequestBody(body, requestFormat, endpoint.RequestFormat)
+			upstreamBody, prepareErr := conversion.ConvertRequest(body, linkRequestFormat, endpoint.RequestFormat)
 			if prepareErr != nil {
 				lastErr = fmt.Errorf("provider %s request adaptation failed: %w", provider.Name, prepareErr)
 				break
@@ -102,6 +116,13 @@ func (f *Forwarder) HandleRequest(w http.ResponseWriter, r *http.Request, link m
 			usedModel := modelOverride
 
 			validationErr := validateResult(res, endpoint.ResponseFormat)
+			clientBody := res.Body
+			if validationErr == nil {
+				clientBody, validationErr = conversion.ConvertResponse(res.Body, endpoint.ResponseFormat, linkResponseFormat)
+				if validationErr == nil {
+					validationErr = validateResult(providers.Result{StatusCode: res.StatusCode, Body: clientBody}, linkResponseFormat)
+				}
+			}
 			success := validationErr == nil
 			f.Stats.Record(models.RequestLog{
 				LinkID: link.ID, Path: link.Path, ProviderID: provider.ID,
@@ -115,7 +136,7 @@ func (f *Forwarder) HandleRequest(w http.ResponseWriter, r *http.Request, link m
 			})
 
 			if success {
-				writeJSON(w, res.StatusCode, res.Body)
+				writeJSON(w, res.StatusCode, clientBody)
 				return
 			}
 			lastErr = validationErr
@@ -154,6 +175,48 @@ func endpointForRequest(provider models.Provider, protocol, responseFormat strin
 		}
 	}
 	return models.ProviderEndpoint{}, false
+}
+
+func endpointForFormats(provider models.Provider, protocol, requestFormat, responseFormat string) (models.ProviderEndpoint, bool) {
+	for _, endpoint := range provider.Endpoints {
+		if endpoint.Protocol == protocol && endpoint.BaseURL != "" && conversion.CanConvert(requestFormat, endpoint.RequestFormat) && conversion.CanConvert(endpoint.ResponseFormat, responseFormat) {
+			return endpoint, true
+		}
+	}
+	return models.ProviderEndpoint{}, false
+}
+
+func endpointForEntry(provider models.Provider, entry models.ChainEntry, protocol, requestFormat, responseFormat string) (models.ProviderEndpoint, bool) {
+	if len(entry.SupportedFormats) == 0 {
+		return endpointForFormats(provider, protocol, requestFormat, responseFormat)
+	}
+	base, ok := firstEndpointForProtocol(provider, protocol)
+	if !ok {
+		return models.ProviderEndpoint{}, false
+	}
+	base.BaseURL = operationBaseURL(base.BaseURL)
+	base.RequestFormat = requestFormat
+	base.ResponseFormat = responseFormat
+	return base, true
+}
+
+func operationBaseURL(raw string) string {
+	base := strings.TrimRight(raw, "/")
+	for _, suffix := range []string{"/chat/completions", "/responses", "/messages"} {
+		if strings.HasSuffix(base, suffix) {
+			return strings.TrimSuffix(base, suffix)
+		}
+	}
+	return base
+}
+
+func hasFormat(formats []string, format string) bool {
+	for _, candidate := range formats {
+		if candidate == format {
+			return true
+		}
+	}
+	return false
 }
 
 func firstEndpointForProtocol(provider models.Provider, protocol string) (models.ProviderEndpoint, bool) {
@@ -201,56 +264,27 @@ func endpointURL(endpoint models.ProviderEndpoint) string {
 	}
 }
 
-// ValidateChain probes each configured node once. The returned status is
-// persisted with the link so the console can make failed nodes visually quiet.
+// ValidateChain actively probes every wire format rather than trusting a
+// provider type or endpoint declaration. The link's capability is the
+// intersection of all node capabilities.
 func (f *Forwarder) ValidateChain(ctx context.Context, link models.ProxyLink) models.ProxyLink {
+	link.SupportedFormats = nil
 	for i := range link.Chain {
 		entry := &link.Chain[i]
-		now := time.Now()
-		startedAt := now
-		entry.ValidatedAt = now
+		entry.ValidatedAt = time.Now()
+		entry.SupportedFormats = nil
+		entry.ValidationError = ""
 		ok := false
 		entry.ValidationOK = &ok
-		entry.ValidationError = ""
-		providerName := entry.ProviderID
-		model := entry.FallbackModel
-		var requestBody, responseBody []byte
-		var upstreamURL string
-		var upstreamHeaders models.Map
-		var upstreamBody []byte
-		var responseHeaders models.Map
-		recordValidation := func(statusCode int) {
-			if f.Stats == nil {
-				return
-			}
-			attributes := models.Map{"_request_type": "link_validation", "_chain_position": i}
-			for key, value := range link.Attributes {
-				attributes[key] = value
-			}
-			f.Stats.Record(models.RequestLog{
-				LinkID: link.ID, Path: link.Path, ProviderID: entry.ProviderID,
-				ProviderName: providerName, Model: model,
-				StatusCode: statusCode, LatencyMS: time.Since(startedAt).Milliseconds(),
-				Success: *entry.ValidationOK, ErrorMessage: entry.ValidationError,
-				RequestBody: logBody(requestBody),
-				UpstreamURL: upstreamURL, UpstreamHeaders: upstreamHeaders, UpstreamBody: logBody(upstreamBody),
-				ResponseHeaders: responseHeaders, ResponseBody: logBody(responseBody),
-				Attributes: attributes, CreatedAt: time.Now(),
-			})
-		}
 		if entry.Protocol != "" && link.Protocol != "" && entry.Protocol != link.Protocol {
 			entry.ValidationError = fmt.Sprintf("protocol mismatch: node uses %s, link requires %s", entry.Protocol, link.Protocol)
-			recordValidation(0)
 			continue
 		}
-
 		provider, err := f.DB.GetProvider(entry.ProviderID)
 		if err != nil || !provider.Enabled {
 			entry.ValidationError = "provider unavailable"
-			recordValidation(0)
 			continue
 		}
-		providerName = provider.Name
 		if entry.ApiKey != "" {
 			provider.APIKey = entry.ApiKey
 		}
@@ -258,56 +292,89 @@ func (f *Forwarder) ValidateChain(ctx context.Context, link models.ProxyLink) mo
 		if protocol == "" {
 			protocol = link.Protocol
 		}
-		adapter, exists := providers.AdapterForProtocol(provider.Type, protocol)
-		if !exists {
-			entry.ValidationError = "provider adapter unavailable"
-			recordValidation(0)
+		adapter, adapterExists := providers.AdapterForProtocol(provider.Type, protocol)
+		base, endpointExists := firstEndpointForProtocol(provider, protocol)
+		if !adapterExists || !endpointExists {
+			entry.ValidationError = "provider adapter or endpoint unavailable"
 			continue
 		}
-		endpoint, exists := firstEndpointForProtocol(provider, protocol)
-		if !exists {
-			entry.ValidationError = fmt.Sprintf("provider does not support protocol %s", protocol)
-			recordValidation(0)
-			continue
-		}
-		provider.BaseURL = endpointURL(endpoint)
+		model := entry.FallbackModel
 		if model == "" && len(provider.Models) > 0 {
 			model = provider.Models[0]
 		}
 		if model == "" {
 			entry.ValidationError = "no model configured for validation"
-			recordValidation(0)
 			continue
 		}
-		requestPayload := map[string]any{"model": model}
-		switch endpoint.RequestFormat {
-		case models.FormatResponses:
-			requestPayload["input"] = "Reply with OK."
-			requestPayload["max_output_tokens"] = 100
-		case models.FormatMessages, models.FormatChatCompletions:
-			requestPayload["messages"] = []map[string]string{{"role": "user", "content": "Reply with OK."}}
-			requestPayload["max_tokens"] = 100
+		formats := []string{models.FormatChatCompletions, models.FormatResponses}
+		if protocol == models.ProtocolAnthropic {
+			formats = []string{models.FormatMessages}
 		}
-		body, _ := json.Marshal(requestPayload)
-		requestBody = body
-		probeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		res := adapter.Forward(probeCtx, providers.FromModel(provider), openAIRequest(body, model), model, endpoint.RequestFormat)
-		responseBody = res.Body
-		responseHeaders = redactStringHeaders(res.ResponseHeaders)
-		upstreamURL = redactURL(res.RequestURL)
-		upstreamHeaders = redactStringHeaders(res.RequestHeaders)
-		upstreamBody = res.RequestBody
-		cancel()
-		if err := validateResult(res, endpoint.ResponseFormat); err != nil {
-			entry.ValidationError = err.Error()
-			recordValidation(res.StatusCode)
-			continue
+		errs := []string{}
+		for _, format := range formats {
+			endpoint := base
+			endpoint.BaseURL = operationBaseURL(base.BaseURL)
+			endpoint.RequestFormat, endpoint.ResponseFormat = format, format
+			provider.BaseURL = endpointURL(endpoint)
+			body := validationBody(model, format)
+			probeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+			res := adapter.Forward(probeCtx, providers.FromModel(provider), openAIRequest(body, model), model, format)
+			cancel()
+			err := validateResult(res, format)
+			f.recordValidationAttempt(link, *entry, i, provider.Name, model, format, body, res, err)
+			if err == nil {
+				entry.SupportedFormats = append(entry.SupportedFormats, format)
+			} else {
+				errs = append(errs, format+": "+err.Error())
+			}
 		}
-		ok = true
-		entry.ValidationOK = &ok
-		recordValidation(res.StatusCode)
+		if len(entry.SupportedFormats) > 0 {
+			ok = true
+			entry.ValidationOK = &ok
+		} else {
+			entry.ValidationError = strings.Join(errs, "; ")
+		}
+		if i == 0 {
+			link.SupportedFormats = append([]string(nil), entry.SupportedFormats...)
+		} else {
+			link.SupportedFormats = intersectFormats(link.SupportedFormats, entry.SupportedFormats)
+		}
 	}
 	return link
+}
+
+func validationBody(model, format string) []byte {
+	payload := map[string]any{"model": model}
+	if format == models.FormatResponses {
+		payload["input"] = "Reply with OK."
+		payload["max_output_tokens"] = 100
+	} else {
+		payload["messages"] = []map[string]string{{"role": "user", "content": "Reply with OK."}}
+		payload["max_tokens"] = 100
+	}
+	body, _ := json.Marshal(payload)
+	return body
+}
+
+func intersectFormats(left, right []string) []string {
+	out := []string{}
+	for _, format := range left {
+		if hasFormat(right, format) {
+			out = append(out, format)
+		}
+	}
+	return out
+}
+
+func (f *Forwarder) recordValidationAttempt(link models.ProxyLink, entry models.ChainEntry, position int, providerName, model, format string, body []byte, res providers.Result, validationErr error) {
+	if f.Stats == nil {
+		return
+	}
+	attributes := models.Map{"_request_type": "link_validation", "_chain_position": position, "_format": format}
+	for key, value := range link.Attributes {
+		attributes[key] = value
+	}
+	f.Stats.Record(models.RequestLog{LinkID: link.ID, Path: link.Path, ProviderID: entry.ProviderID, ProviderName: providerName, Model: model, StatusCode: res.StatusCode, Success: validationErr == nil, ErrorMessage: errStr(validationErr), RequestBody: logBody(body), UpstreamURL: redactURL(res.RequestURL), UpstreamHeaders: redactStringHeaders(res.RequestHeaders), UpstreamBody: logBody(res.RequestBody), ResponseHeaders: redactStringHeaders(res.ResponseHeaders), ResponseBody: logBody(res.Body), Attributes: attributes, CreatedAt: time.Now()})
 }
 
 const maxLoggedBodyBytes = 1024 * 1024

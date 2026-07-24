@@ -24,10 +24,6 @@ func normalizeProviderEndpoints(p models.Provider) []models.ProviderEndpoint {
 		if endpoint.ResponseFormat == "" {
 			endpoint.ResponseFormat = endpoint.RequestFormat
 		}
-		if p.Type == "opencode" {
-			endpoint.RequestFormat = models.FormatChatCompletions
-			endpoint.ResponseFormat = models.FormatResponses
-		}
 		endpoint.BaseURL = strings.TrimRight(strings.TrimSpace(endpoint.BaseURL), "/")
 		key := endpoint.Protocol + "\x00" + endpoint.ResponseFormat
 		if endpoint.Protocol == "" || endpoint.RequestFormat == "" || endpoint.ResponseFormat == "" || endpoint.BaseURL == "" || seen[key] {
@@ -40,10 +36,6 @@ func normalizeProviderEndpoints(p models.Provider) []models.ProviderEndpoint {
 		protocol := normalizeProtocol("", p.Type)
 		format := inferEndpointFormat("", p.BaseURL, p.Type)
 		responseFormat := format
-		if p.Type == "opencode" {
-			format = models.FormatChatCompletions
-			responseFormat = models.FormatResponses
-		}
 		out = append(out, models.ProviderEndpoint{
 			Protocol: protocol, RequestFormat: format, ResponseFormat: responseFormat,
 			BaseURL: strings.TrimRight(strings.TrimSpace(p.BaseURL), "/"),
@@ -159,10 +151,10 @@ func (d *DB) SaveLink(l models.ProxyLink) error {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`INSERT INTO proxy_links(id,name,path,protocol,attributes_json,enabled,created_at)
-		VALUES(?,?,?,?,?,?,?)
-		ON CONFLICT(id) DO UPDATE SET name=excluded.name,path=excluded.path,protocol=excluded.protocol,attributes_json=excluded.attributes_json,enabled=excluded.enabled`,
-		l.ID, l.Name, l.Path, l.Protocol, enc(l.Attributes), btoi(l.Enabled), l.CreatedAt.UTC()); err != nil {
+	if _, err := tx.Exec(`INSERT INTO proxy_links(id,name,path,protocol,supported_formats_json,attributes_json,enabled,created_at)
+		VALUES(?,?,?,?,?,?,?,?)
+		ON CONFLICT(id) DO UPDATE SET name=excluded.name,path=excluded.path,protocol=excluded.protocol,supported_formats_json=excluded.supported_formats_json,attributes_json=excluded.attributes_json,enabled=excluded.enabled`,
+		l.ID, l.Name, l.Path, l.Protocol, enc(l.SupportedFormats), enc(l.Attributes), btoi(l.Enabled), l.CreatedAt.UTC()); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`DELETE FROM proxy_link_providers WHERE link_id=?`, l.ID); err != nil {
@@ -178,8 +170,8 @@ func (d *DB) SaveLink(l models.ProxyLink) error {
 		if !e.ValidatedAt.IsZero() {
 			validatedAt = e.ValidatedAt.UTC()
 		}
-		if _, err := tx.Exec(`INSERT INTO proxy_link_providers(link_id,position,provider_id,protocol,retry_count,fallback_model,api_key,rules_json,validation_ok,validation_error,validated_at)
-			VALUES(?,?,?,?,?,?,?,?,?,?,?)`, l.ID, i, e.ProviderID, e.Protocol, e.RetryCount, e.FallbackModel, e.ApiKey, rules, validationOK, e.ValidationError, validatedAt); err != nil {
+		if _, err := tx.Exec(`INSERT INTO proxy_link_providers(link_id,position,provider_id,protocol,retry_count,fallback_model,api_key,rules_json,validation_ok,validation_error,validated_at,supported_formats_json)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, l.ID, i, e.ProviderID, e.Protocol, e.RetryCount, e.FallbackModel, e.ApiKey, rules, validationOK, e.ValidationError, validatedAt, enc(e.SupportedFormats)); err != nil {
 			return err
 		}
 	}
@@ -187,7 +179,7 @@ func (d *DB) SaveLink(l models.ProxyLink) error {
 }
 
 func (d *DB) ListLinks() ([]models.ProxyLink, error) {
-	rows, err := d.Query(`SELECT id,name,path,protocol,attributes_json,enabled,created_at FROM proxy_links ORDER BY created_at`)
+	rows, err := d.Query(`SELECT id,name,path,protocol,supported_formats_json,attributes_json,enabled,created_at FROM proxy_links ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -195,13 +187,14 @@ func (d *DB) ListLinks() ([]models.ProxyLink, error) {
 	out := make([]models.ProxyLink, 0)
 	for rows.Next() {
 		var l models.ProxyLink
-		var attrJSON string
+		var attrJSON, formatsJSON string
 		var enabled int
 		var created string
-		if err := rows.Scan(&l.ID, &l.Name, &l.Path, &l.Protocol, &attrJSON, &enabled, &created); err != nil {
+		if err := rows.Scan(&l.ID, &l.Name, &l.Path, &l.Protocol, &formatsJSON, &attrJSON, &enabled, &created); err != nil {
 			return nil, err
 		}
 		l.Attributes = decMap(attrJSON)
+		_ = json.Unmarshal([]byte(formatsJSON), &l.SupportedFormats)
 		l.Enabled = enabled == 1
 		l.CreatedAt = parseTime(created)
 		out = append(out, l)
@@ -221,11 +214,11 @@ func (d *DB) ListLinks() ([]models.ProxyLink, error) {
 
 func (d *DB) GetLinkByPath(path string) (models.ProxyLink, error) {
 	var l models.ProxyLink
-	var attrJSON string
+	var attrJSON, formatsJSON string
 	var enabled int
 	var created string
-	err := d.QueryRow(`SELECT id,name,path,protocol,attributes_json,enabled,created_at FROM proxy_links WHERE path=?`, path).
-		Scan(&l.ID, &l.Name, &l.Path, &l.Protocol, &attrJSON, &enabled, &created)
+	err := d.QueryRow(`SELECT id,name,path,protocol,supported_formats_json,attributes_json,enabled,created_at FROM proxy_links WHERE path=?`, path).
+		Scan(&l.ID, &l.Name, &l.Path, &l.Protocol, &formatsJSON, &attrJSON, &enabled, &created)
 	if err == sql.ErrNoRows {
 		return l, ErrNotFound
 	}
@@ -233,6 +226,7 @@ func (d *DB) GetLinkByPath(path string) (models.ProxyLink, error) {
 		return l, err
 	}
 	l.Attributes = decMap(attrJSON)
+	_ = json.Unmarshal([]byte(formatsJSON), &l.SupportedFormats)
 	l.Enabled = enabled == 1
 	l.CreatedAt = parseTime(created)
 	l.Chain, err = d.loadChain(l.ID)
@@ -241,11 +235,11 @@ func (d *DB) GetLinkByPath(path string) (models.ProxyLink, error) {
 
 func (d *DB) GetLink(id string) (models.ProxyLink, error) {
 	var l models.ProxyLink
-	var attrJSON string
+	var attrJSON, formatsJSON string
 	var enabled int
 	var created string
-	err := d.QueryRow(`SELECT id,name,path,protocol,attributes_json,enabled,created_at FROM proxy_links WHERE id=?`, id).
-		Scan(&l.ID, &l.Name, &l.Path, &l.Protocol, &attrJSON, &enabled, &created)
+	err := d.QueryRow(`SELECT id,name,path,protocol,supported_formats_json,attributes_json,enabled,created_at FROM proxy_links WHERE id=?`, id).
+		Scan(&l.ID, &l.Name, &l.Path, &l.Protocol, &formatsJSON, &attrJSON, &enabled, &created)
 	if err == sql.ErrNoRows {
 		return l, ErrNotFound
 	}
@@ -253,6 +247,7 @@ func (d *DB) GetLink(id string) (models.ProxyLink, error) {
 		return l, err
 	}
 	l.Attributes = decMap(attrJSON)
+	_ = json.Unmarshal([]byte(formatsJSON), &l.SupportedFormats)
 	l.Enabled = enabled == 1
 	l.CreatedAt = parseTime(created)
 	l.Chain, err = d.loadChain(l.ID)
@@ -260,7 +255,7 @@ func (d *DB) GetLink(id string) (models.ProxyLink, error) {
 }
 
 func (d *DB) loadChain(linkID string) ([]models.ChainEntry, error) {
-	rows, err := d.Query(`SELECT provider_id,protocol,retry_count,fallback_model,api_key,rules_json,validation_ok,validation_error,validated_at FROM proxy_link_providers WHERE link_id=? ORDER BY position`, linkID)
+	rows, err := d.Query(`SELECT provider_id,protocol,retry_count,fallback_model,api_key,rules_json,validation_ok,validation_error,validated_at,supported_formats_json FROM proxy_link_providers WHERE link_id=? ORDER BY position`, linkID)
 	if err != nil {
 		return nil, err
 	}
@@ -268,10 +263,10 @@ func (d *DB) loadChain(linkID string) ([]models.ChainEntry, error) {
 	chain := make([]models.ChainEntry, 0)
 	for rows.Next() {
 		var e models.ChainEntry
-		var rulesJSON string
+		var rulesJSON, formatsJSON string
 		var validationOK sql.NullInt64
 		var validatedAt sql.NullString
-		if err := rows.Scan(&e.ProviderID, &e.Protocol, &e.RetryCount, &e.FallbackModel, &e.ApiKey, &rulesJSON, &validationOK, &e.ValidationError, &validatedAt); err != nil {
+		if err := rows.Scan(&e.ProviderID, &e.Protocol, &e.RetryCount, &e.FallbackModel, &e.ApiKey, &rulesJSON, &validationOK, &e.ValidationError, &validatedAt, &formatsJSON); err != nil {
 			return nil, err
 		}
 		if validationOK.Valid {
@@ -282,6 +277,7 @@ func (d *DB) loadChain(linkID string) ([]models.ChainEntry, error) {
 			e.ValidatedAt = parseTime(validatedAt.String)
 		}
 		_ = json.Unmarshal([]byte(rulesJSON), &e.Rules)
+		_ = json.Unmarshal([]byte(formatsJSON), &e.SupportedFormats)
 		chain = append(chain, e)
 	}
 	return chain, rows.Err()
@@ -305,7 +301,9 @@ func (d *DB) ListRecentLogs(limit int) ([]models.RequestLog, error) {
 		limit = 100
 	}
 	rows, err := d.Query(`SELECT id,link_id,path,provider_id,provider_name,model,status_code,latency_ms,success,error_message,request_url,request_headers_json,request_body,upstream_url,upstream_headers_json,upstream_body,response_headers_json,response_body,attributes_json,created_at
-		FROM request_logs ORDER BY created_at DESC, rowid DESC LIMIT ?`, limit)
+		FROM request_logs
+		WHERE COALESCE(json_extract(attributes_json, '$._request_type'), '') != 'link_validation'
+		ORDER BY created_at DESC, rowid DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -320,7 +318,7 @@ func (d *DB) ListLatestValidationLogs() ([]models.RequestLog, error) {
 		WHERE rowid IN (
 			SELECT MAX(rowid) FROM request_logs
 			WHERE json_extract(attributes_json, '$._request_type') = 'link_validation'
-			GROUP BY link_id, provider_id, json_extract(attributes_json, '$._chain_position')
+			GROUP BY link_id, provider_id, json_extract(attributes_json, '$._chain_position'), json_extract(attributes_json, '$._format')
 		)
 		ORDER BY created_at DESC, rowid DESC`)
 	if err != nil {

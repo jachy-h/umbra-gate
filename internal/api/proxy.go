@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -26,17 +27,27 @@ func (p *ProxyAPI) Info(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"ok": link.Enabled, "name": link.Name, "path": link.Path,
-		"chat_completions": "/llm-gateway-lite/" + link.Path + "/v1/chat/completions",
-		"responses":        "/llm-gateway-lite/" + link.Path + "/v1/responses",
-		"messages":         "/llm-gateway-lite/" + link.Path + "/v1/messages",
-		"protocol":         link.Protocol,
-		"checked_at":       time.Now().UTC(),
+		"chat_completions":  "/llm-gateway-lite/" + link.Path + "/v1/chat/completions",
+		"responses":         "/llm-gateway-lite/" + link.Path + "/v1/responses",
+		"messages":          "/llm-gateway-lite/" + link.Path + "/v1/messages",
+		"protocol":          link.Protocol,
+		"supported_formats": link.SupportedFormats,
+		"checked_at":        time.Now().UTC(),
 	})
 }
 
 // Responses handles the OpenAI Responses API. Endpoint-specific adaptation is
 // only applied when a provider explicitly declares an asymmetric request shape.
 func (p *ProxyAPI) Responses(c *gin.Context) {
+	// Some OpenAI SDKs append the operation name to their configured base URL.
+	// Accept a full /responses operation URL as the base without exposing the
+	// resulting /responses/responses duplication to routing or request logs.
+	if strings.HasSuffix(c.Request.URL.Path, "/responses/responses") {
+		c.Request.URL.Path = strings.TrimSuffix(c.Request.URL.Path, "/responses")
+	}
+	if strings.HasSuffix(c.Request.URL.RawPath, "/responses/responses") {
+		c.Request.URL.RawPath = strings.TrimSuffix(c.Request.URL.RawPath, "/responses")
+	}
 	link, err := p.DB.GetLinkByPath(c.Param("path"))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "proxy link not found"})

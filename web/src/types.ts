@@ -31,8 +31,9 @@ export interface ChainEntry {
   api_key?: string
   rules?: Rules
   validation_ok?: boolean
-  validation_error?: string
-  validated_at?: string
+	validation_error?: string
+	validated_at?: string
+	supported_formats?: EndpointFormat[]
 }
 
 export interface RequestLog {
@@ -68,7 +69,8 @@ export interface ProxyLink {
   id: string
   name: string
   path: string
-  protocol: ProviderProtocol | ''
+	protocol: ProviderProtocol | ''
+	supported_formats?: EndpointFormat[]
   attributes: Record<string, unknown>
   chain: ChainEntry[]
   enabled: boolean

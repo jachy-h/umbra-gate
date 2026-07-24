@@ -59,11 +59,13 @@ func (d *DB) migrate() error {
 			name TEXT NOT NULL,
 			path TEXT NOT NULL UNIQUE,
 			protocol TEXT NOT NULL DEFAULT '',
+			supported_formats_json TEXT NOT NULL DEFAULT '[]',
 			attributes_json TEXT NOT NULL DEFAULT '{}',
 			enabled INTEGER NOT NULL DEFAULT 1,
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`ALTER TABLE proxy_links ADD COLUMN protocol TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE proxy_links ADD COLUMN supported_formats_json TEXT NOT NULL DEFAULT '[]'`,
 		`CREATE TABLE IF NOT EXISTS proxy_link_providers (
 			link_id TEXT NOT NULL,
 			position INTEGER NOT NULL,
@@ -76,6 +78,7 @@ func (d *DB) migrate() error {
 			validation_ok INTEGER,
 			validation_error TEXT NOT NULL DEFAULT '',
 			validated_at DATETIME,
+			supported_formats_json TEXT NOT NULL DEFAULT '[]',
 			PRIMARY KEY (link_id, position),
 			FOREIGN KEY (link_id) REFERENCES proxy_links(id) ON DELETE CASCADE
 		)`,
@@ -84,6 +87,7 @@ func (d *DB) migrate() error {
 		`ALTER TABLE proxy_link_providers ADD COLUMN validation_ok INTEGER`,
 		`ALTER TABLE proxy_link_providers ADD COLUMN validation_error TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE proxy_link_providers ADD COLUMN validated_at DATETIME`,
+		`ALTER TABLE proxy_link_providers ADD COLUMN supported_formats_json TEXT NOT NULL DEFAULT '[]'`,
 		`CREATE TABLE IF NOT EXISTS request_logs (
 			id TEXT PRIMARY KEY,
 			link_id TEXT NOT NULL,
@@ -212,7 +216,7 @@ func decMap(s string) models.Map {
 }
 
 func (d *DB) seed() error {
-	const providerSeedVersion = "2026-07-23-minimal-builtins"
+	const providerSeedVersion = "2026-07-24-opencode-base-prefix"
 
 	type seedProvider struct {
 		id      string
@@ -224,9 +228,9 @@ func (d *DB) seed() error {
 	builtins := []seedProvider{
 		{id: "deepseek", name: "DeepSeek", typ: "deepseek", baseURL: "https://api.deepseek.com",
 			models: []string{"deepseek-chat", "deepseek-reasoner"}},
-		{id: "opencode", name: "OpenCode", typ: "opencode", baseURL: "https://opencode.ai/zen/v1/responses",
+		{id: "opencode", name: "OpenCode", typ: "opencode", baseURL: "https://opencode.ai/zen/v1",
 			models: []string{}},
-		{id: "opencode-go", name: "OpenCode Go", typ: "opencode", baseURL: "https://opencode.ai/zen/go/v1/responses",
+		{id: "opencode-go", name: "OpenCode Go", typ: "opencode", baseURL: "https://opencode.ai/zen/go/v1",
 			models: []string{}},
 	}
 

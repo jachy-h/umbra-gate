@@ -170,7 +170,8 @@ func (a *AdminAPI) CreateLink(c *gin.Context) {
 		return
 	}
 	// The first node fixes the link protocol. Every following node must select
-	// an endpoint for that same protocol.
+	// a compatible endpoint. The console does not ask users to choose a style;
+	// infer it from the primary provider and keep the chain internally safe.
 	for i := range l.Chain {
 		e := &l.Chain[i]
 		provider, err := a.DB.GetProvider(e.ProviderID)
@@ -179,16 +180,13 @@ func (a *AdminAPI) CreateLink(c *gin.Context) {
 			return
 		}
 		if e.Protocol == "" {
-			for _, endpoint := range provider.Endpoints {
-				if e.Protocol == "" {
-					e.Protocol = endpoint.Protocol
-				} else if e.Protocol != endpoint.Protocol {
-					e.Protocol = ""
-					break
-				}
+			if i > 0 && l.Protocol != "" && providerSupportsProtocol(provider, l.Protocol) {
+				e.Protocol = l.Protocol
+			} else if len(provider.Endpoints) > 0 {
+				e.Protocol = provider.Endpoints[0].Protocol
 			}
 			if e.Protocol == "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "chain entry " + itoa(i) + ": select a provider protocol"})
+				c.JSON(http.StatusBadRequest, gin.H{"error": "chain entry " + itoa(i) + ": provider has no protocol endpoint"})
 				return
 			}
 		}

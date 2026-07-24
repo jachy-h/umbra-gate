@@ -190,6 +190,41 @@ func TestHandleResponsesUsesProtocolEndpointWithoutConversion(t *testing.T) {
 	}
 }
 
+func TestHandleChatConvertsToResponsesEndpointAndBack(t *testing.T) {
+	providers.Register(responsesTestAdapter{})
+	database, err := db.Open(filepath.Join(t.TempDir(), "gateway.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	provider := models.Provider{
+		ID: "responses-from-chat", Name: "responses-from-chat", Type: "responses-test",
+		Endpoints: []models.ProviderEndpoint{{Protocol: models.ProtocolOpenAI, RequestFormat: models.FormatResponses, ResponseFormat: models.FormatResponses, BaseURL: "https://provider.test/v1/responses"}},
+		Enabled:   true, CreatedAt: time.Now(),
+	}
+	if err := database.UpsertProvider(provider); err != nil {
+		t.Fatal(err)
+	}
+	forwarder := &Forwarder{DB: database, Stats: stats.New(database)}
+	link := models.ProxyLink{ID: "dynamic-link", Path: "dynamic", Protocol: models.ProtocolOpenAI, Chain: []models.ChainEntry{{ProviderID: provider.ID, Protocol: models.ProtocolOpenAI}}}
+	request := httptest.NewRequest(http.MethodPost, "/llm-gateway-lite/dynamic/v1/chat/completions", strings.NewReader(`{"model":"test","messages":[{"role":"user","content":"hello"}],"max_tokens":32}`))
+	response := httptest.NewRecorder()
+
+	forwarder.HandleRequest(response, request, link, models.ProtocolOpenAI, models.FormatChatCompletions)
+
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"choices"`) || !strings.Contains(response.Body.String(), `"content":"ok"`) {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	logs, err := database.ListRecentLogs(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 1 || !strings.Contains(logs[0].UpstreamBody, `"input"`) || !strings.Contains(logs[0].UpstreamBody, `"max_output_tokens":32`) {
+		t.Fatalf("Chat request was not converted to Responses: %+v", logs)
+	}
+}
+
 type responsesTestAdapter struct{}
 
 func (responsesTestAdapter) Type() string { return "responses-test" }
@@ -200,7 +235,7 @@ func (responsesTestAdapter) Forward(_ context.Context, provider providers.Provid
 	}
 	return providers.Result{
 		StatusCode:  http.StatusOK,
-		Body:        []byte(`{"id":"resp_1","object":"response","output":[{"type":"message"}]}`),
+		Body:        []byte(`{"id":"resp_1","object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}`),
 		RequestURL:  provider.BaseURL,
 		RequestBody: req.Raw,
 	}
@@ -232,25 +267,31 @@ func TestValidateChainRecordsLinkTestRequest(t *testing.T) {
 	if validated.Chain[0].ValidationOK == nil || !*validated.Chain[0].ValidationOK {
 		t.Fatalf("expected validation success: %+v", validated.Chain[0])
 	}
-	logs, err := database.ListRecentLogs(100)
+	if !hasFormat(validated.Chain[0].SupportedFormats, models.FormatChatCompletions) || !hasFormat(validated.SupportedFormats, models.FormatChatCompletions) {
+		t.Fatalf("expected Chat Completions capability: %+v", validated)
+	}
+	logs, err := database.ListLatestValidationLogs()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(logs) != 1 || !logs[0].Success || logs[0].Attributes["_request_type"] != "link_validation" {
+	var chatLog *models.RequestLog
+	for i := range logs {
+		if logs[i].Attributes["_format"] == models.FormatChatCompletions {
+			chatLog = &logs[i]
+			break
+		}
+	}
+	if chatLog == nil || !chatLog.Success || chatLog.Attributes["_request_type"] != "link_validation" {
 		t.Fatalf("validation request was not recorded: %+v", logs)
 	}
-	if logs[0].RequestBody == "" || logs[0].ResponseBody == "" {
-		t.Fatalf("validation request detail was not recorded: %+v", logs[0])
+	if chatLog.RequestBody == "" || chatLog.ResponseBody == "" {
+		t.Fatalf("validation request detail was not recorded: %+v", chatLog)
 	}
-	if !strings.Contains(logs[0].RequestBody, `"max_tokens":100`) {
-		t.Fatalf("link validation output limit was not recorded: %s", logs[0].RequestBody)
+	if !strings.Contains(chatLog.RequestBody, `"max_tokens":100`) {
+		t.Fatalf("link validation output limit was not recorded: %s", chatLog.RequestBody)
 	}
-	latest, err := database.ListLatestValidationLogs()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(latest) != 1 || intValue(latest[0].Attributes["_chain_position"]) != 0 {
-		t.Fatalf("latest validation request was not addressable by chain node: %+v", latest)
+	if intValue(chatLog.Attributes["_chain_position"]) != 0 {
+		t.Fatalf("validation request was not addressable by chain node: %+v", logs)
 	}
 }
 

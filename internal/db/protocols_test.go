@@ -28,7 +28,7 @@ func TestProviderSeedsIncludeOnlyDeepSeekAndOpenCode(t *testing.T) {
 	}
 }
 
-func TestOpenCodeGoSeedDeclaresAsymmetricOpenAIEndpoint(t *testing.T) {
+func TestOpenCodeGoSeedDeclaresResponsesEndpoint(t *testing.T) {
 	database, err := Open(filepath.Join(t.TempDir(), "gateway.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -44,9 +44,9 @@ func TestOpenCodeGoSeedDeclaresAsymmetricOpenAIEndpoint(t *testing.T) {
 	}
 	endpoint := provider.Endpoints[0]
 	if endpoint.Protocol != models.ProtocolOpenAI ||
-		endpoint.RequestFormat != models.FormatChatCompletions ||
+		endpoint.RequestFormat != models.FormatResponses ||
 		endpoint.ResponseFormat != models.FormatResponses ||
-		endpoint.BaseURL != "https://opencode.ai/zen/go/v1/responses" {
+		endpoint.BaseURL != "https://opencode.ai/zen/go/v1" {
 		t.Fatalf("OpenCode Go endpoint contract = %+v", endpoint)
 	}
 }
@@ -93,7 +93,7 @@ func TestOpenCodeSeedUsesResponsesEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if provider.BaseURL != "https://opencode.ai/zen/v1/responses" || len(provider.Endpoints) != 1 || provider.Endpoints[0].BaseURL != provider.BaseURL {
+	if provider.BaseURL != "https://opencode.ai/zen/v1" || len(provider.Endpoints) != 1 || provider.Endpoints[0].BaseURL != provider.BaseURL {
 		t.Fatalf("OpenCode endpoint = provider=%q endpoints=%+v", provider.BaseURL, provider.Endpoints)
 	}
 }

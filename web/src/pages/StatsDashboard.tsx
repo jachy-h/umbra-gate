@@ -186,8 +186,8 @@ export function StatsDashboard() {
 
           <div className="overflow-hidden rounded-xl border border-[var(--color-hairline)] bg-[var(--color-canvas)]">
             <div className="px-8 py-5 border-b border-[var(--color-hairline-soft)]">
-              <h3 className="text-lg font-semibold text-[var(--color-ink)]">Latest 100 Requests</h3>
-              <p className="mt-1 text-sm text-[var(--color-muted)]">Each provider attempt is recorded, including automatic fallback attempts.</p>
+              <h3 className="text-lg font-semibold text-[var(--color-ink)]">Latest 100 Proxy Requests</h3>
+              <p className="mt-1 text-sm text-[var(--color-muted)]">Each provider attempt is recorded, including automatic fallback attempts. Link Test records appear on the Links page.</p>
             </div>
             {requests.length === 0 ? (
               <p className="px-8 py-10 text-sm text-[var(--color-muted)]">No requests recorded yet.</p>
