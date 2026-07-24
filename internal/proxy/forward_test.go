@@ -287,7 +287,7 @@ func TestValidateChainRecordsLinkTestRequest(t *testing.T) {
 	if chatLog.RequestBody == "" || chatLog.ResponseBody == "" {
 		t.Fatalf("validation request detail was not recorded: %+v", chatLog)
 	}
-	if !strings.Contains(chatLog.RequestBody, `"max_tokens":100`) {
+	if !strings.Contains(chatLog.RequestBody, `"max_tokens":1024`) {
 		t.Fatalf("link validation output limit was not recorded: %s", chatLog.RequestBody)
 	}
 	if intValue(chatLog.Attributes["_chain_position"]) != 0 {

@@ -350,7 +350,7 @@ func validationBody(model, format string) []byte {
 		payload["max_output_tokens"] = 100
 	} else {
 		payload["messages"] = []map[string]string{{"role": "user", "content": "Reply with OK."}}
-		payload["max_tokens"] = 100
+		payload["max_tokens"] = 1024
 	}
 	body, _ := json.Marshal(payload)
 	return body
