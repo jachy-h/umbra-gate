@@ -7,8 +7,10 @@ import { Badge } from "../components/Badge";
 import { Button } from "../components/Button";
 import { Spinner } from "../components/Spinner";
 import { formatLabel } from "../protocols";
+import { useTranslation } from "../i18n";
 
 export function LinkManager() {
+	const { t } = useTranslation();
 	const [links, setLinks] = useState<ProxyLink[]>([]);
 	const [providers, setProviders] = useState<Provider[]>([]);
 	const [loading, setLoading] = useState(true);
@@ -31,12 +33,12 @@ export function LinkManager() {
 	}, []);
 
 	const remove = async (id: string) => {
-		if (!confirm("Delete this proxy link?")) return;
+		if (!confirm(t.links.deleteConfirm)) return;
 		try {
 			await api.deleteLink(id);
 			fetchAll();
 		} catch (e: unknown) {
-			alert(e instanceof Error ? e.message : "Delete failed");
+			alert(e instanceof Error ? e.message : t.links.deleteFailed);
 		}
 	};
 
@@ -46,7 +48,7 @@ export function LinkManager() {
 			await api.testLink(id);
 			await fetchAll();
 		} catch (e: unknown) {
-			alert(e instanceof Error ? e.message : "Link test failed");
+			alert(e instanceof Error ? e.message : t.links.testFailed);
 		} finally {
 			setTestingLinkID(null);
 		}
@@ -82,32 +84,40 @@ export function LinkManager() {
 			<div className="flex items-center justify-between">
 				<div>
 					<h1 className="text-[28px] font-semibold leading-[1.2] tracking-[-0.5px] text-[var(--color-ink)]">
-						Proxy Links
+						{t.links.title}
 					</h1>
 					<p className="mt-2 text-[var(--color-muted)] text-base">
-						Configure proxy routes with provider chaining for fallback.
+						{t.links.subtitle}
 					</p>
 				</div>
-				<Button onClick={() => navigate("/links/new")}>+ New Link</Button>
+				<Button onClick={() => navigate("/links/new")}>
+					{t.links.newLink}
+				</Button>
 			</div>
 
 			{loading ? (
 				<Spinner />
 			) : links.length === 0 ? (
 				<Card className="text-center text-[var(--color-muted)] py-16">
-					No proxy links configured. Create one to start routing requests.
+					{t.links.noLinks}
 				</Card>
 			) : (
 				<div className="overflow-x-auto rounded-xl border border-[var(--color-hairline)] bg-[var(--color-canvas)]">
 					<table className="w-full min-w-[900px]">
 						<thead>
 							<tr className="border-b border-[var(--color-hairline-soft)] text-left text-sm font-medium text-[var(--color-muted)]">
-								<th className="px-6 py-3 font-medium w-[140px]">Name</th>
-								<th className="px-6 py-3 font-medium">Capability check</th>
-								<th className="px-6 py-3 font-medium w-[220px]">Proxy URL</th>
-								<th className="px-6 py-3 font-medium">Chain</th>
+								<th className="px-6 py-3 font-medium w-[140px]">
+									{t.links.tableName}
+								</th>
+								<th className="px-6 py-3 font-medium">
+									{t.links.tableCapabilityCheck}
+								</th>
+								<th className="px-6 py-3 font-medium w-[220px]">
+									{t.links.tableProxyUrl}
+								</th>
+								<th className="px-6 py-3 font-medium">{t.links.tableChain}</th>
 								<th className="px-6 py-3 font-medium w-[180px] sticky right-0 bg-[var(--color-canvas)]">
-									Actions
+									{t.links.tableActions}
 								</th>
 							</tr>
 						</thead>
@@ -149,8 +159,7 @@ export function LinkManager() {
 												</div>
 											) : (
 												<span className="text-xs text-[var(--color-error)] font-medium">
-													No shared capability — providers in chain have no
-													common format
+													{t.links.noCommonFormat}
 												</span>
 											)}
 										</div>
@@ -166,7 +175,7 @@ export function LinkManager() {
 											<button
 												onClick={() => copyUrl(l.path)}
 												className="inline-flex items-center justify-center w-6 h-6 rounded-md cursor-pointer hover:bg-[var(--color-surface-soft)] text-[var(--color-muted)] hover:text-[var(--color-ink)] transition-colors shrink-0"
-												title="Copy URL"
+												title={t.links.copyUrl}
 											>
 												<svg
 													width="14"
@@ -243,16 +252,18 @@ export function LinkManager() {
 												size="sm"
 												onClick={() => testLink(l.id)}
 												disabled={testingLinkID === l.id}
-												title="Run a Link Test against every provider in this chain"
+												title={t.links.testTitle}
 											>
-												{testingLinkID === l.id ? "Testing…" : "Test"}
+												{testingLinkID === l.id
+													? t.links.testing
+													: t.links.test}
 											</Button>
 											<Button
 												variant="ghost"
 												size="sm"
 												onClick={() => navigate(`/links/edit/${l.id}`)}
 											>
-												Edit
+												{t.links.edit}
 											</Button>
 											<Button
 												variant="ghost"
@@ -260,7 +271,7 @@ export function LinkManager() {
 												onClick={() => remove(l.id)}
 												className="!text-[var(--color-error)]"
 											>
-												Del
+												{t.links.del}
 											</Button>
 										</div>
 									</td>

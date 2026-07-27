@@ -20,7 +20,7 @@ umbragate start
 - **Chain & failover.** Stack providers by priority. Each gets retry counts, status-code rules, error matching, timeout policies, and fallback model overrides. One fails, the next fires.
 - **Attribute-driven analytics.** Tag links with `key:value` attributes. Stats auto-aggregate hourly by link × provider × attribute — cost allocation and usage tracking built in.
 - **Protocol-aware routing.** One OpenAI Link accepts both `/v1/chat/completions` and `/v1/responses`. Saving or testing a Link actively probes every node, records its supported formats, and exposes only the formats shared by the full chain. Anthropic Messages remains native.
-- **Web console included.** A React SPA ships inside the binary. Manage links, configure chains, browse stats — all from the browser. The console automatically detects each node's protocol and API-format capabilities; no protocol-style selector is required.
+- **Web console included.** A React SPA ships inside the binary. Manage links, configure chains, browse stats — all from the browser. The console automatically detects each node's protocol and API-format capabilities; no protocol-style selector is required. Switch between English and Chinese from the top-right corner — your preference is saved locally.
 
 ## Getting Started
 
@@ -31,7 +31,7 @@ umbragate start
 
 Or build from source: `make && ./umbragate` (requires Go + Node.js).
 
-1. Open **http://localhost:8787** — the built-in web console.
+1. Open **<http://localhost:8787>** — the built-in web console.
 2. DeepSeek, OpenCode, and OpenCode Go are preconfigured. Add API keys or create any additional providers you need.
 3. Create a proxy link, stack providers in priority order, set fallback rules, then save. UmbraGate probes Chat Completions and Responses for every OpenAI node and shows the formats the entire chain supports.
 4. Copy the link's URL and paste it into your favorite AI client — OpenCode, Cursor, ChatGPT client, or any OpenAI-compatible tool.

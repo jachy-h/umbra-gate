@@ -20,7 +20,7 @@ umbragate start
 - **链路式故障切换。** 按优先级堆叠多个 Provider，每个可配置重试次数、状态码规则、错误匹配、超时策略和降级模型。一个挂了，下一个顶上。
 - **按属性统计。** 给链接打上 `键:值` 属性标签，统计按 链接 × Provider × 属性 × 小时 自动聚合 —— 成本分摊、用量追踪一步到位。
 - **协议感知路由。** 一个 OpenAI Link 同时可接收 `/v1/chat/completions` 与 `/v1/responses`。保存或测试 Link 时会主动探测每个节点，记录其支持格式，并且只对外提供全链共同支持的格式。Anthropic Messages 保持原生协议。
-- **自带 Web 控制台。** React SPA 随二进制一同打包。在浏览器里管理链接、配置链路、查看统计 —— 不用敲 CLI，不用写配置（当然 config.yaml 需要时也在）。控制台会自动识别每个节点的协议与 API 格式能力，不需要手动选择协议风格。
+- **自带 Web 控制台。** React SPA 随二进制一同打包。在浏览器里管理链接、配置链路、查看统计 —— 不用敲 CLI，不用写配置（当然 config.yaml 需要时也在）。控制台会自动识别每个节点的协议与 API 格式能力，不需要手动选择协议风格。右上角可切换中英文界面，偏好自动保存在本地。
 
 ## 快速上手
 
@@ -31,7 +31,7 @@ umbragate start
 
 或从源码构建：`make && ./umbragate`（需要 Go + Node.js）。
 
-1. 打开 **http://localhost:8787** — 内置 Web 控制台。
+1. 打开 **<http://localhost:8787>** — 内置 Web 控制台。
 2. DeepSeek、OpenCode 和 OpenCode Go 已预置；填入 API Key，或按需创建其他 Provider。
 3. 创建代理链接，按优先级堆叠 Provider，配置故障切换规则后保存。UmbraGate 会探测每个 OpenAI 节点的 Chat Completions 与 Responses 能力，并显示全链支持的格式。
 4. 复制链接 URL，填入你喜欢的 AI 客户端 —— OpenCode、Cursor、ChatGPT 客户端，或任何 OpenAI 兼容工具。
