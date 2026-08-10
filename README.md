@@ -35,7 +35,7 @@ Filter operational results by link and time range to see request volume, success
 
 ## For developers
 
-Build from source with `make && ./umbragate` (requires Go and Node.js).
+Build from source with `make && ./umbragate run` (requires Go and Node.js).
 
 - UmbraGate exposes one OpenAI-compatible endpoint to your application and routes requests through the providers configured in its link.
 - It probes each OpenAI node for Chat Completions and Responses support, exposing only the formats common to the link. Anthropic Messages remains native.
@@ -60,7 +60,7 @@ umbragate version # or: umbragate -v
 
 `start` runs in the background; `run` runs in the foreground. After a background start, `start` and `status` print the Web UI URL. Running `start` while UmbraGate is already running shows its status instead of failing. Both modes use `~/.umbragate/config.yaml` by default. Use a custom configuration with `umbragate start -config /path/to/config.yaml`, `umbragate restart -config /path/to/config.yaml`, or `umbragate run -config /path/to/config.yaml`.
 
-Runtime files are stored in `~/.umbragate/`: `umbragate.pid` records the background process, `umbragate.url` records the Web UI URL, and `umbragate.log` contains its output. Running `umbragate` without a command is equivalent to `umbragate run`.
+Runtime files are stored in `~/.umbragate/`: `umbragate.pid` records the background process, `umbragate.url` records the Web UI URL, and `umbragate.log` contains its output. Running `umbragate` without a command displays help; use `umbragate run` to run in the foreground.
 
 ## Release verification
 

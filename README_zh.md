@@ -35,7 +35,7 @@ umbragate start
 
 ## 面向开发者
 
-可从源码构建：`make && ./umbragate`（需要 Go 和 Node.js）。
+可从源码构建并运行：`make && ./umbragate run`（需要 Go 和 Node.js）。
 
 - UmbraGate 为应用提供一个兼容 OpenAI 的端点，并通过 Link 中配置的 Provider 路由请求。
 - 它会探测每个 OpenAI 节点对 Chat Completions 与 Responses 的支持，只暴露 Link 全链共同支持的格式；Anthropic Messages 保持原生协议。
@@ -60,7 +60,7 @@ umbragate version # 或：umbragate -v
 
 `start` 在后台运行，`run` 在前台运行。后台启动后，`start` 与 `status` 会打印 Web UI URL。UmbraGate 已在运行时再次执行 `start`，会显示状态而非报错。两种模式默认使用 `~/.umbragate/config.yaml`。自定义配置可使用 `umbragate start -config /path/to/config.yaml`、`umbragate restart -config /path/to/config.yaml` 或 `umbragate run -config /path/to/config.yaml`。
 
-运行时文件位于 `~/.umbragate/`：`umbragate.pid` 记录后台进程，`umbragate.url` 记录 Web UI URL，`umbragate.log` 保存输出。不带命令执行 `umbragate` 等同于 `umbragate run`。
+运行时文件位于 `~/.umbragate/`：`umbragate.pid` 记录后台进程，`umbragate.url` 记录 Web UI URL，`umbragate.log` 保存输出。不带命令执行 `umbragate` 会显示帮助；请使用 `umbragate run` 在前台运行。
 
 ## 发布验证
 

@@ -28,57 +28,59 @@ var version = "dev"
 
 func main() {
 	args := os.Args[1:]
-	if len(args) > 0 {
-		switch args[0] {
-		case "-h", "--help", "help":
-			printUsage(os.Stdout)
-			return
-		case "-v", "--version", "version":
-			if len(args) != 1 {
-				log.Fatal("version does not accept arguments")
-			}
-			printVersion(os.Stdout)
-			return
-		case "start":
-			configPath, err := parseConfigFlag("start", args[1:])
-			if err != nil {
-				log.Fatal(err)
-			}
-			if err := startDaemon(configPath); err != nil {
-				log.Fatal(err)
-			}
-			return
-		case "stop":
-			if len(args) != 1 {
-				log.Fatal("stop does not accept arguments")
-			}
-			if err := stopDaemon(); err != nil {
-				log.Fatal(err)
-			}
-			return
-		case "restart":
-			configPath, err := parseConfigFlag("restart", args[1:])
-			if err != nil {
-				log.Fatal(err)
-			}
-			if err := stopDaemon(); err != nil {
-				log.Fatal(err)
-			}
-			if err := startDaemon(configPath); err != nil {
-				log.Fatal(err)
-			}
-			return
-		case "status":
-			if len(args) != 1 {
-				log.Fatal("status does not accept arguments")
-			}
-			if err := daemonStatus(); err != nil {
-				log.Fatal(err)
-			}
-			return
-		case "run":
-			args = args[1:]
+	if len(args) == 0 {
+		printUsage(os.Stdout)
+		return
+	}
+	switch args[0] {
+	case "-h", "--help", "help":
+		printUsage(os.Stdout)
+		return
+	case "-v", "--version", "version":
+		if len(args) != 1 {
+			log.Fatal("version does not accept arguments")
 		}
+		printVersion(os.Stdout)
+		return
+	case "start":
+		configPath, err := parseConfigFlag("start", args[1:])
+		if err != nil {
+			log.Fatal(err)
+		}
+		if err := startDaemon(configPath); err != nil {
+			log.Fatal(err)
+		}
+		return
+	case "stop":
+		if len(args) != 1 {
+			log.Fatal("stop does not accept arguments")
+		}
+		if err := stopDaemon(); err != nil {
+			log.Fatal(err)
+		}
+		return
+	case "restart":
+		configPath, err := parseConfigFlag("restart", args[1:])
+		if err != nil {
+			log.Fatal(err)
+		}
+		if err := stopDaemon(); err != nil {
+			log.Fatal(err)
+		}
+		if err := startDaemon(configPath); err != nil {
+			log.Fatal(err)
+		}
+		return
+	case "status":
+		if len(args) != 1 {
+			log.Fatal("status does not accept arguments")
+		}
+		if err := daemonStatus(); err != nil {
+			log.Fatal(err)
+		}
+		return
+	case "run":
+		args = args[1:]
 	}
 
 	cfgPath, err := parseConfigFlag("run", args)
@@ -160,7 +162,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  stop              gracefully stop the background process")
 	fmt.Fprintln(w, "  restart           restart the background process")
 	fmt.Fprintln(w, "  status            show background process status")
-	fmt.Fprintln(w, "  run               run in the foreground (default)")
+	fmt.Fprintln(w, "  run               run in the foreground")
 	fmt.Fprintln(w, "  version           show version information")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Flags:")
