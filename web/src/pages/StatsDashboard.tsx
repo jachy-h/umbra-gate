@@ -4,7 +4,6 @@ import type { StatsRow, ProxyLink, RequestLog } from "../types";
 import { Card } from "../components/Card";
 import { Badge } from "../components/Badge";
 import { Spinner } from "../components/Spinner";
-import { Button } from "../components/Button";
 import { SearchableSelect } from "../components/SearchableSelect";
 import { RequestDetailsModal } from "../components/RequestDetailsModal";
 import { useTranslation } from "../i18n";
@@ -25,6 +24,16 @@ function fmtRate(success: number, total: number) {
 	return ((success / total) * 100).toFixed(1) + "%";
 }
 
+function rangeStart(dateRange: string) {
+	const hours: Record<string, number> = {
+		"24h": 24,
+		"7d": 24 * 7,
+		"30d": 24 * 30,
+	};
+	if (!hours[dateRange]) return undefined;
+	return new Date(Date.now() - hours[dateRange] * 60 * 60 * 1000).toISOString();
+}
+
 export function StatsDashboard() {
 	const { t } = useTranslation();
 	const [stats, setStats] = useState<StatsRow[]>([]);
@@ -37,37 +46,35 @@ export function StatsDashboard() {
 	const [linkFilter, setLinkFilter] = useState("");
 	const [dateRange, setDateRange] = useState("all");
 
-	const rangeStart = () => {
-		const hours: Record<string, number> = {
-			"24h": 24,
-			"7d": 24 * 7,
-			"30d": 24 * 30,
-		};
-		if (!hours[dateRange]) return undefined;
-		return new Date(
-			Date.now() - hours[dateRange] * 60 * 60 * 1000,
-		).toISOString();
-	};
-
-	const fetchData = () => {
+	useEffect(() => {
+		let cancelled = false;
 		setLoading(true);
+
 		Promise.all([
-			api.getStats({ link_id: linkFilter || undefined, from: rangeStart() }),
+			api.getStats({
+				link_id: linkFilter || undefined,
+				from: rangeStart(dateRange),
+			}),
 			api.listLinks(),
 			api.listRecentRequests(),
 		])
 			.then(([s, l, r]) => {
+				if (cancelled) return;
 				setStats(s.stats || []);
 				setLinks(l);
 				setRequests(r);
 			})
-			.catch(console.error)
-			.finally(() => setLoading(false));
-	};
+			.catch((error) => {
+				if (!cancelled) console.error(error);
+			})
+			.finally(() => {
+				if (!cancelled) setLoading(false);
+			});
 
-	useEffect(() => {
-		fetchData();
-	}, []);
+		return () => {
+			cancelled = true;
+		};
+	}, [linkFilter, dateRange]);
 
 	const aggregated = useMemo(() => {
 		const byLink: Record<
@@ -154,7 +161,6 @@ export function StatsDashboard() {
 						placeholder={t.stats.selectRange}
 					/>
 				</div>
-				<Button onClick={fetchData}>{t.stats.apply}</Button>
 			</div>
 
 			{loading ? (

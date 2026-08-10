@@ -7,6 +7,7 @@ import (
 	"embed"
 	"io/fs"
 	"net/http"
+	"path"
 	"strings"
 )
 
@@ -39,7 +40,14 @@ func Handler() http.Handler {
 			p = "index.html"
 		}
 		if _, err := fs.Stat(fsys, p); err != nil {
-			// SPA fallback: serve index.html for any unknown route.
+			// Never return the SPA document for a missing static asset. Browsers
+			// otherwise report a misleading module MIME-type error when a stale
+			// index.html refers to a removed hashed bundle.
+			if path.Ext(p) != "" {
+				http.NotFound(w, r)
+				return
+			}
+			// SPA fallback: serve index.html for any unknown client-side route.
 			r.URL.Path = "/"
 		}
 		fileServer.ServeHTTP(w, r)

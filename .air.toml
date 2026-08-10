@@ -1,0 +1,15 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+# Rebuild the Vite bundle before compiling so Go embeds an index.html whose
+# hashed asset names match the files in internal/web/dist.
+cmd = "cd web && npm run build && cd .. && go build -o ./tmp/umbragate ."
+bin = "./tmp/umbragate"
+include_ext = ["go", "html", "css", "ts", "tsx"]
+exclude_dir = ["tmp", "vendor", "web/node_modules", "internal/web/dist"]
+exclude_regex = ["_test.go"]
+delay = 300
+
+[log]
+time = true

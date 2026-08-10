@@ -13,6 +13,7 @@
 #   make stop       -> stop the background process
 #   make restart    -> web + build + restart in background
 #   make test       -> go test ./...
+#   make release-verify TAG=vX.Y.Z -> validate docs and run the production release build
 #   make clean      -> remove built artifacts
 
 GO            ?= go
@@ -24,7 +25,7 @@ WEB_DIST      ?= internal/web/dist
 LDFLAGS       := -s -w
 GOFLAGS       := -trimpath
 
-.PHONY: all web build run start stop restart status test clean install check-web
+.PHONY: all web build run start stop restart status test release-verify clean install check-web
 
 all: web build
 
@@ -32,7 +33,7 @@ all: web build
 # works even before the frontend has been built.
 check-web:
 	@mkdir -p $(WEB_DIST)
-	@if [ ! -f $(WEB_DIST)/index.html ]; then echo "frontend not built; placeholder served" >&2; fi
+	test -f $(WEB_DIST)/index.html || echo "frontend not built; placeholder served" >&2
 
 # Build the frontend. The Vite config (web/vite.config.ts) outputs to
 # ../internal/web/dist so the Go embed directive picks it up.
@@ -61,6 +62,21 @@ status: build
 
 test:
 	$(GO) test ./...
+
+# Verify the exact commit intended for a release before creating or pushing its
+# tag. TAG must be vMAJOR.MINOR.PATCH (optionally with SemVer prerelease/build
+# metadata). The target performs the same frontend build, embed check, Go
+# release build, and tests that CI requires.
+release-verify:
+	test -n "$(TAG)" || { echo "usage: make release-verify TAG=vX.Y.Z" >&2; exit 2; }
+	./scripts/release-verify.sh --tag "$(TAG)" --require-clean
+	$(MAKE) web
+	@set -e; \
+		release_binary="/tmp/umbragate-release-check"; \
+		trap 'rm -f "$$release_binary"' EXIT; \
+		$(GO) build $(GOFLAGS) -ldflags="$(LDFLAGS) -X main.version=$(patsubst v%,%,$(TAG))" -o "$$release_binary" $(PKG); \
+		$(GO) test ./...; \
+		./scripts/release-verify.sh --tag "$(TAG)" --binary "$$release_binary"
 
 clean:
 	rm -f $(BINARY)
