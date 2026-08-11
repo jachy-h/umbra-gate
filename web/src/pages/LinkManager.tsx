@@ -6,6 +6,8 @@ import { Card } from "../components/Card";
 import { Badge } from "../components/Badge";
 import { Button } from "../components/Button";
 import { Spinner } from "../components/Spinner";
+import { Modal } from "../components/Modal";
+import { Input } from "../components/Input";
 import { formatLabel } from "../protocols";
 import { useTranslation } from "../i18n";
 
@@ -15,6 +17,8 @@ export function LinkManager() {
 	const [providers, setProviders] = useState<Provider[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [testingLinkID, setTestingLinkID] = useState<string | null>(null);
+	const [testModelLinkID, setTestModelLinkID] = useState<string | null>(null);
+	const [testModel, setTestModel] = useState("");
 	const { navigate } = useHash();
 
 	const fetchAll = () => {
@@ -42,16 +46,22 @@ export function LinkManager() {
 		}
 	};
 
-	const testLink = async (id: string) => {
+	const testLink = async (id: string, model?: string) => {
 		setTestingLinkID(id);
 		try {
-			await api.testLink(id);
+			await api.testLink(id, model);
 			await fetchAll();
+			setTestModelLinkID(null);
 		} catch (e: unknown) {
 			alert(e instanceof Error ? e.message : t.links.testFailed);
 		} finally {
 			setTestingLinkID(null);
 		}
+	};
+
+	const openTestLink = (id: string) => {
+		setTestModelLinkID(id);
+		setTestModel("");
 	};
 
 	const gatewayBase =
@@ -203,7 +213,6 @@ export function LinkManager() {
 									<td className="px-6 py-4 text-sm">
 										<div className="flex items-center flex-wrap gap-1.5">
 											{l.chain?.map((c, i) => {
-												const hasOverride = !!c.api_key;
 												const failed = c.validation_ok === false;
 												return (
 													<span key={i} className="flex items-center gap-1.5">
@@ -237,7 +246,6 @@ export function LinkManager() {
 																}
 															>
 																{providerName(c.provider_id)}
-																{hasOverride && " *"}
 															</Badge>
 														</span>
 													</span>
@@ -250,9 +258,10 @@ export function LinkManager() {
 											<Button
 												variant="secondary"
 												size="sm"
-												onClick={() => testLink(l.id)}
+												onClick={() => openTestLink(l.id)}
 												disabled={testingLinkID === l.id}
 												title={t.links.testTitle}
+												className="min-w-[60px]"
 											>
 												{testingLinkID === l.id
 													? t.links.testing
@@ -262,6 +271,7 @@ export function LinkManager() {
 												variant="ghost"
 												size="sm"
 												onClick={() => navigate(`/links/edit/${l.id}`)}
+												className="min-w-[60px]"
 											>
 												{t.links.edit}
 											</Button>
@@ -269,7 +279,7 @@ export function LinkManager() {
 												variant="ghost"
 												size="sm"
 												onClick={() => remove(l.id)}
-												className="!text-[var(--color-error)]"
+												className="min-w-[60px] !text-[var(--color-error)]"
 											>
 												{t.links.del}
 											</Button>
@@ -281,6 +291,38 @@ export function LinkManager() {
 					</table>
 				</div>
 			)}
+			<Modal
+				open={testModelLinkID !== null}
+				title={t.links.testTitle}
+				onClose={() => !testingLinkID && setTestModelLinkID(null)}
+			>
+				<div className="space-y-5">
+					<Input
+						label={t.links.testModel}
+						value={testModel}
+						onChange={(event) => setTestModel(event.target.value)}
+						placeholder={t.links.testModelPlaceholder}
+					/>
+					<div className="flex justify-end gap-3">
+						<Button
+							variant="secondary"
+							onClick={() => setTestModelLinkID(null)}
+							disabled={testingLinkID !== null}
+						>
+							{t.providers.cancel}
+						</Button>
+						<Button
+							onClick={() =>
+								testModelLinkID &&
+								testLink(testModelLinkID, testModel || undefined)
+							}
+							disabled={testingLinkID !== null}
+						>
+							{testingLinkID ? t.links.testing : t.links.runTest}
+						</Button>
+					</div>
+				</div>
+			</Modal>
 		</div>
 	);
 }

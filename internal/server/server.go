@@ -46,11 +46,14 @@ func New(cfg config.Config, d *db.DB) (*gin.Engine, *stats.Service) {
 
 		ag.GET("/providers", admin.ListProviders)
 		ag.POST("/providers", admin.CreateProvider)
+		ag.PUT("/providers/:id/api-key", admin.UpdateProviderAPIKey)
+		ag.POST("/providers/:id/models/refresh", admin.RefreshProviderModels)
 		ag.GET("/providers/:id", admin.GetProvider)
 		ag.DELETE("/providers/:id", admin.DeleteProvider)
 
 		ag.GET("/links", admin.ListLinks)
 		ag.POST("/links", admin.CreateLink)
+		ag.POST("/links/stream", admin.CreateLinkStream)
 		ag.GET("/links/:id", admin.GetLink)
 		ag.POST("/links/:id/test", admin.TestLink)
 		ag.DELETE("/links/:id", admin.DeleteLink)

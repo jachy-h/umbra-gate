@@ -45,6 +45,8 @@ export function ProviderManager() {
 	const [error, setError] = useState("");
 	const [keyEditingId, setKeyEditingId] = useState<string | null>(null);
 	const [keyValue, setKeyValue] = useState("");
+	const [modelsProvider, setModelsProvider] = useState<Provider | null>(null);
+	const [modelSearch, setModelSearch] = useState("");
 
 	const fetchAll = () => {
 		setLoading(true);
@@ -120,22 +122,13 @@ export function ProviderManager() {
 
 	const startKeyEdit = (p: Provider) => {
 		setKeyEditingId(p.id);
-		setKeyValue(p.api_key || "");
+		setKeyValue("");
 	};
 
 	const saveKey = async (p: Provider) => {
 		setSaving(true);
 		try {
-			await api.createProvider({
-				id: p.id,
-				name: p.name,
-				type: p.type,
-				base_url: p.base_url,
-				endpoints: p.endpoints,
-				api_key: keyValue,
-				models: p.models || [],
-				enabled: p.enabled,
-			});
+			await api.updateProviderAPIKey(p.id, keyValue);
 			setKeyEditingId(null);
 			fetchAll();
 		} catch (e: unknown) {
@@ -246,6 +239,10 @@ export function ProviderManager() {
 		}));
 	};
 
+	const matchingModels = (modelsProvider?.models ?? []).filter((model) =>
+		model.toLowerCase().includes(modelSearch.trim().toLowerCase()),
+	);
+
 	return (
 		<div className="space-y-8 animate-fade-in">
 			<div className="flex items-center justify-between">
@@ -325,7 +322,12 @@ export function ProviderManager() {
 										{keyEditingId === p.id ? (
 											<div className="flex items-center gap-2">
 												<input
-													type="password"
+													type="text"
+													autoComplete="off"
+													name={`provider-api-key-${p.id}`}
+													data-1p-ignore="true"
+													data-lpignore="true"
+													spellCheck={false}
 													value={keyValue}
 													onChange={(e) => setKeyValue(e.target.value)}
 													className="h-8 w-48 px-2.5 rounded-md border border-[var(--color-hairline)] bg-[var(--color-canvas)] text-sm outline-none focus:border-[var(--color-ink)]"
@@ -369,11 +371,23 @@ export function ProviderManager() {
 									</td>
 									<td className="px-8 py-4">
 										<div className="flex gap-2">
+											<Button
+												variant="ghost"
+												size="sm"
+												onClick={() => {
+													setModelSearch("");
+													setModelsProvider(p);
+												}}
+												className="min-w-[76px]"
+											>
+												{t.providers.showModels}
+											</Button>
 											{!p.builtin && (
 												<Button
 													variant="ghost"
 													size="sm"
 													onClick={() => openEdit(p)}
+													className="min-w-[60px]"
 												>
 													{t.providers.edit}
 												</Button>
@@ -383,7 +397,7 @@ export function ProviderManager() {
 													variant="ghost"
 													size="sm"
 													onClick={() => remove(p.id)}
-													className="!text-[var(--color-error)]"
+													className="min-w-[60px] !text-[var(--color-error)]"
 												>
 													{t.providers.del}
 												</Button>
@@ -396,6 +410,52 @@ export function ProviderManager() {
 					</table>
 				</div>
 			)}
+
+			<Modal
+				open={modelsProvider !== null}
+				title={`${modelsProvider?.name ?? ""} · ${t.providers.modelsLabel}`}
+				onClose={() => setModelsProvider(null)}
+				className="!max-w-xl !h-[70vh] flex flex-col"
+			>
+				<div className="flex min-h-0 flex-1 flex-col gap-3">
+					<Input
+						label={t.providers.searchModels}
+						value={modelSearch}
+						onChange={(event) => setModelSearch(event.target.value)}
+						placeholder={t.providers.searchModels}
+						autoFocus
+					/>
+					<div className="min-h-0 flex-1">
+						{modelsProvider?.models?.length ? (
+							matchingModels.length ? (
+								<ul className="h-full space-y-1 overflow-y-auto rounded-lg border border-[var(--color-hairline)] bg-[var(--color-surface-soft)] p-2">
+									{matchingModels.map((model) => (
+										<li
+											key={model}
+											className="rounded-md bg-[var(--color-canvas)] px-3 py-2 font-mono text-sm text-[var(--color-ink)]"
+										>
+											{model}
+										</li>
+									))}
+								</ul>
+							) : (
+								<p className="flex h-full items-center text-sm text-[var(--color-muted)]">
+									{t.providers.noMatchingModels}
+								</p>
+							)
+						) : (
+							<p className="flex h-full items-center text-sm text-[var(--color-muted)]">
+								{t.providers.noModels}
+							</p>
+						)}
+					</div>
+				</div>
+				<div className="mt-5 flex justify-end">
+					<Button variant="secondary" onClick={() => setModelsProvider(null)}>
+						{t.providers.cancel}
+					</Button>
+				</div>
+			</Modal>
 
 			<Modal
 				open={modalOpen}
@@ -501,7 +561,12 @@ export function ProviderManager() {
 					</div>
 					<Input
 						label={t.providers.apiKeyLabel}
-						type="password"
+						type="text"
+						autoComplete="off"
+						name="provider-api-key-form"
+						data-1p-ignore="true"
+						data-lpignore="true"
+						spellCheck={false}
 						value={form.api_key}
 						onChange={(e) => setForm({ ...form, api_key: e.target.value })}
 						placeholder={t.providers.apiKeyPlaceholder}

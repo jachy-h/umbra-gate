@@ -37,7 +37,7 @@ func TestHandleFallsBackOnAnyFailedResponse(t *testing.T) {
 	}
 
 	forwarder := &Forwarder{DB: database, Stats: stats.New(database)}
-	link := models.ProxyLink{ID: "link", Path: "token", Protocol: models.ProtocolOpenAI, Chain: []models.ChainEntry{{ProviderID: "failed", Protocol: models.ProtocolOpenAI}, {ProviderID: "succeeded", Protocol: models.ProtocolOpenAI}}}
+	link := models.ProxyLink{ID: "link", Path: "token", Protocol: models.ProtocolOpenAI, Chain: []models.ChainEntry{{ProviderID: "failed", Protocol: models.ProtocolOpenAI, ModelPriorities: []models.ModelPriority{{Source: models.ModelPriorityRequestModel}}}, {ProviderID: "succeeded", Protocol: models.ProtocolOpenAI, ModelPriorities: []models.ModelPriority{{Source: models.ModelPriorityRequestModel}}}}}
 	body := []byte(`{"model":"test","messages":[{"role":"user","content":"hello"}]}`)
 	req := httptest.NewRequest(http.MethodPost, "/llm-gateway-lite/token/v1/chat/completions", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer agent-secret")
@@ -86,7 +86,7 @@ func TestHandleUsesOnlyLinkConfiguredAttributes(t *testing.T) {
 		t.Fatal(err)
 	}
 	forwarder := &Forwarder{DB: database, Stats: stats.New(database)}
-	link := models.ProxyLink{ID: "link", Path: "token", Protocol: models.ProtocolOpenAI, Attributes: models.Map{"environment": "production"}, Chain: []models.ChainEntry{{ProviderID: provider.ID, Protocol: models.ProtocolOpenAI}}}
+	link := models.ProxyLink{ID: "link", Path: "token", Protocol: models.ProtocolOpenAI, Attributes: models.Map{"environment": "production"}, Chain: []models.ChainEntry{{ProviderID: provider.ID, Protocol: models.ProtocolOpenAI, ModelPriorities: []models.ModelPriority{{Source: models.ModelPriorityRequestModel}}}}}
 	req := httptest.NewRequest(http.MethodPost, "/llm-gateway-lite/token/v1/chat/completions", strings.NewReader(`{"model":"test","messages":[{"role":"user","content":"hello"}]}`))
 	req.Header.Set("X-Gateway-Attributes", `{"untrusted":"random-value","environment":"overridden"}`)
 
@@ -171,7 +171,7 @@ func TestHandleResponsesUsesProtocolEndpointWithoutConversion(t *testing.T) {
 	forwarder := &Forwarder{DB: database, Stats: stats.New(database)}
 	link := models.ProxyLink{
 		ID: "responses-link", Path: "responses", Protocol: models.ProtocolOpenAI,
-		Chain: []models.ChainEntry{{ProviderID: provider.ID, Protocol: models.ProtocolOpenAI}},
+		Chain: []models.ChainEntry{{ProviderID: provider.ID, Protocol: models.ProtocolOpenAI, ModelPriorities: []models.ModelPriority{{Source: models.ModelPriorityRequestModel}}}},
 	}
 	body := `{"model":"test","input":"hello","max_output_tokens":32}`
 	request := httptest.NewRequest(http.MethodPost, "/llm-gateway-lite/responses/v1/responses", strings.NewReader(body))
@@ -207,7 +207,7 @@ func TestHandleChatConvertsToResponsesEndpointAndBack(t *testing.T) {
 		t.Fatal(err)
 	}
 	forwarder := &Forwarder{DB: database, Stats: stats.New(database)}
-	link := models.ProxyLink{ID: "dynamic-link", Path: "dynamic", Protocol: models.ProtocolOpenAI, Chain: []models.ChainEntry{{ProviderID: provider.ID, Protocol: models.ProtocolOpenAI}}}
+	link := models.ProxyLink{ID: "dynamic-link", Path: "dynamic", Protocol: models.ProtocolOpenAI, Chain: []models.ChainEntry{{ProviderID: provider.ID, Protocol: models.ProtocolOpenAI, ModelPriorities: []models.ModelPriority{{Source: models.ModelPriorityRequestModel}}}}}
 	request := httptest.NewRequest(http.MethodPost, "/llm-gateway-lite/dynamic/v1/chat/completions", strings.NewReader(`{"model":"test","messages":[{"role":"user","content":"hello"}],"max_tokens":32}`))
 	response := httptest.NewRecorder()
 
@@ -260,7 +260,7 @@ func TestValidateChainRecordsLinkTestRequest(t *testing.T) {
 	link := models.ProxyLink{
 		ID: "validation-link", Path: "validation-token", Attributes: models.Map{"env": "test"},
 		Protocol: models.ProtocolOpenAI,
-		Chain:    []models.ChainEntry{{ProviderID: provider.ID, Protocol: models.ProtocolOpenAI}},
+		Chain:    []models.ChainEntry{{ProviderID: provider.ID, Protocol: models.ProtocolOpenAI, ModelPriorities: []models.ModelPriority{{Source: models.ModelPriorityFixedModel, Model: "test-model"}}}},
 	}
 
 	validated := forwarder.ValidateChain(context.Background(), link)

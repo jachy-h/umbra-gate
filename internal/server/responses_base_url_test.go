@@ -38,7 +38,7 @@ func TestResponsesOperationURLCanBeUsedAsSDKBaseURL(t *testing.T) {
 	link := models.ProxyLink{
 		ID: "responses-link", Name: "Responses Link", Path: "token",
 		Protocol: models.ProtocolOpenAI, Enabled: true, CreatedAt: time.Now(),
-		Chain: []models.ChainEntry{{ProviderID: provider.ID, Protocol: models.ProtocolOpenAI}},
+		Chain: []models.ChainEntry{{ProviderID: provider.ID, Protocol: models.ProtocolOpenAI, ModelPriorities: []models.ModelPriority{{Source: models.ModelPriorityRequestModel}}}},
 	}
 	if err := database.SaveLink(link); err != nil {
 		t.Fatal(err)

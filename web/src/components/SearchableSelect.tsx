@@ -5,14 +5,17 @@ import { useTranslation } from "../i18n";
 interface Option {
 	label: string;
 	value: string;
+	hasAPIKey?: boolean;
 }
 
 interface SearchableSelectProps {
 	options: Option[];
 	value: string;
 	onChange: (value: string) => void;
+	onOpen?: () => void;
 	placeholder?: string;
 	disabled?: boolean;
+	allowCustomValue?: boolean;
 	className?: string;
 }
 
@@ -20,8 +23,10 @@ export function SearchableSelect({
 	options,
 	value,
 	onChange,
+	onOpen,
 	placeholder,
 	disabled,
+	allowCustomValue = false,
 	className = "",
 }: SearchableSelectProps) {
 	const { t } = useTranslation();
@@ -37,7 +42,7 @@ export function SearchableSelect({
 	} | null>(null);
 
 	const selectedLabel = useMemo(
-		() => options.find((option) => option.value === value)?.label || "",
+		() => options.find((option) => option.value === value)?.label || value,
 		[options, value],
 	);
 
@@ -122,9 +127,13 @@ export function SearchableSelect({
 				setHighlightIndex((previous) =>
 					previous <= 0 ? filtered.length - 1 : previous - 1,
 				);
-			} else if (event.key === "Enter" && open && highlightIndex >= 0) {
+			} else if (event.key === "Enter" && open) {
 				event.preventDefault();
-				choose(filtered[highlightIndex].value);
+				if (highlightIndex >= 0) {
+					choose(filtered[highlightIndex].value);
+				} else if (allowCustomValue && query.trim()) {
+					choose(query.trim());
+				}
 			} else if (event.key === "Escape") {
 				event.preventDefault();
 				setOpen(false);
@@ -132,7 +141,7 @@ export function SearchableSelect({
 				event.currentTarget.blur();
 			}
 		},
-		[choose, filtered, highlightIndex, open],
+		[allowCustomValue, choose, filtered, highlightIndex, open, query],
 	);
 
 	const inputClass = `h-10 w-full rounded-md border border-[var(--color-hairline)] bg-[var(--color-canvas)] pl-3.5 pr-9 text-sm text-[var(--color-ink)] outline-none transition-colors placeholder:text-[var(--color-muted-soft)] focus:border-[var(--color-ink)] ${
@@ -152,6 +161,7 @@ export function SearchableSelect({
 					if (!disabled) {
 						setQuery("");
 						setOpen(true);
+						onOpen?.();
 					}
 				}}
 				onClick={() => !disabled && setOpen(true)}
@@ -160,7 +170,11 @@ export function SearchableSelect({
 					setQuery(event.target.value);
 				}}
 				onKeyDown={handleKeyDown}
+				onBlur={() => {
+					if (allowCustomValue && query.trim()) choose(query.trim());
+				}}
 				disabled={disabled}
+				title={selectedLabel || undefined}
 				placeholder={placeholder}
 				className={inputClass}
 			/>
@@ -205,6 +219,7 @@ export function SearchableSelect({
 										type="button"
 										role="option"
 										aria-selected={option.value === value}
+										title={option.label}
 										onMouseDown={(event) => event.preventDefault()}
 										onClick={() => choose(option.value)}
 										className={`w-full px-3 py-2.5 text-left text-sm transition-colors ${
@@ -215,7 +230,23 @@ export function SearchableSelect({
 													: "text-[var(--color-ink)] hover:bg-[var(--color-surface-soft)]"
 										}`}
 									>
-										{option.label}
+										<span>{option.label}</span>
+										{option.hasAPIKey && (
+											<svg
+												aria-hidden="true"
+												width="13"
+												height="13"
+												viewBox="0 0 24 24"
+												fill="none"
+												stroke="currentColor"
+												strokeWidth="2.5"
+												strokeLinecap="round"
+												strokeLinejoin="round"
+												className="ml-1 inline-block text-[var(--color-success)]"
+											>
+												<path d="m5 12 4 4L19 6" />
+											</svg>
+										)}
 									</button>
 								))
 							)}

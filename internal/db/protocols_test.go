@@ -82,6 +82,40 @@ func TestDeepSeekSeedSupportsOpenAIAndAnthropicProtocols(t *testing.T) {
 	}
 }
 
+func TestDeepSeekSeedRemovesLegacyStaticModels(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gateway.db")
+	database, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, err := database.GetProvider("deepseek")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.Models) != 0 {
+		t.Fatalf("new DeepSeek seed has static models: %#v", provider.Models)
+	}
+	if _, err := database.Exec(`UPDATE providers SET models_json='["deepseek-chat","deepseek-reasoner"]' WHERE id='deepseek'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	database, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	provider, err = database.GetProvider("deepseek")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.Models) != 0 {
+		t.Fatalf("legacy DeepSeek models were retained: %#v", provider.Models)
+	}
+}
+
 func TestOpenCodeSeedUsesResponsesEndpoint(t *testing.T) {
 	database, err := Open(filepath.Join(t.TempDir(), "gateway.db"))
 	if err != nil {

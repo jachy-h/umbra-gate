@@ -1,9 +1,11 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -21,6 +23,7 @@ import (
 
 type AdminAPI struct {
 	DB              *db.DB
+	HTTPClient      *http.Client
 	Forwarder       *proxy.Forwarder
 	StatsService    *stats.Service
 	AttributeLimits config.Storage
@@ -108,8 +111,127 @@ func (a *AdminAPI) CreateProvider(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	p.HasAPIKey = p.APIKey != ""
 	p.APIKey = ""
 	c.JSON(http.StatusCreated, p)
+}
+
+func (a *AdminAPI) UpdateProviderAPIKey(c *gin.Context) {
+	var payload struct {
+		APIKey string `json:"api_key"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := a.DB.UpdateProviderAPIKey(c.Param("id"), payload.APIKey); err != nil {
+		if err == db.ErrNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	p, err := a.DB.GetProvider(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	p.APIKey = ""
+	c.JSON(http.StatusOK, p)
+}
+
+// RefreshProviderModels retrieves an OpenAI-compatible /models catalog,
+// persists it on the Provider, and returns the redacted Provider.
+func (a *AdminAPI) RefreshProviderModels(c *gin.Context) {
+	p, err := a.DB.GetProvider(c.Param("id"))
+	if err != nil {
+		if err == db.ErrNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	providerModels, err := a.fetchProviderModels(c.Request.Context(), p)
+	if err != nil {
+		// Do not keep an unverified catalog after a failed refresh: it can be
+		// stale and lead users to choose models this Provider no longer serves.
+		if clearErr := a.DB.UpdateProviderModels(p.ID, nil); clearErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": clearErr.Error()})
+			return
+		}
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	if err := a.DB.UpdateProviderModels(p.ID, providerModels); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	p.Models = providerModels
+	p.APIKey = ""
+	c.JSON(http.StatusOK, p)
+}
+
+func (a *AdminAPI) fetchProviderModels(ctx context.Context, p models.Provider) ([]string, error) {
+	endpoint, err := providerModelsURL(p.BaseURL)
+	if err != nil {
+		return nil, err
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create model list request: %w", err)
+	}
+	if p.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+p.APIKey)
+	}
+	client := a.HTTPClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	response, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request provider model list: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return nil, fmt.Errorf("provider model list returned %s", response.Status)
+	}
+	var payload struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("decode provider model list: %w", err)
+	}
+	providerModels := make([]string, 0, len(payload.Data))
+	seen := make(map[string]struct{}, len(payload.Data))
+	for _, model := range payload.Data {
+		id := strings.TrimSpace(model.ID)
+		if id == "" {
+			continue
+		}
+		if _, duplicate := seen[id]; duplicate {
+			continue
+		}
+		seen[id] = struct{}{}
+		providerModels = append(providerModels, id)
+	}
+	return providerModels, nil
+}
+
+func providerModelsURL(baseURL string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", fmt.Errorf("provider has an invalid base URL")
+	}
+	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/models"
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String(), nil
 }
 
 func (a *AdminAPI) GetProvider(c *gin.Context) {
@@ -140,11 +262,73 @@ func (a *AdminAPI) ListLinks(c *gin.Context) {
 }
 
 func (a *AdminAPI) CreateLink(c *gin.Context) {
+	l, err := a.prepareLink(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := a.DB.SaveLink(l); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	l, err = a.validateSavedLink(c.Request.Context(), l, nil)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, l)
+}
+
+// CreateLinkStream saves a link and streams each real provider validation as
+// an SSE event. The final "complete" event contains the persisted link.
+func (a *AdminAPI) CreateLinkStream(c *gin.Context) {
+	l, err := a.prepareLink(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := a.DB.SaveLink(l); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+	streamEvent(c, "saved", l)
+
+	l, err = a.validateSavedLink(c.Request.Context(), l, func(progress proxy.ValidationProgress) {
+		streamEvent(c, "provider", progress)
+	})
+	if err != nil {
+		streamEvent(c, "error", gin.H{"error": err.Error()})
+		return
+	}
+	streamEvent(c, "complete", l)
+}
+
+func streamEvent(c *gin.Context, event string, value any) {
+	c.SSEvent(event, value)
+	c.Writer.Flush()
+}
+
+func (a *AdminAPI) validateSavedLink(ctx context.Context, l models.ProxyLink, onProgress func(proxy.ValidationProgress)) (models.ProxyLink, error) {
+	if a.Forwarder == nil {
+		return l, nil
+	}
+	l = a.Forwarder.ValidateChainWithProgress(ctx, l, "", onProgress)
+	if err := a.DB.SaveLink(l); err != nil {
+		return l, err
+	}
+	return l, nil
+}
+
+func (a *AdminAPI) prepareLink(c *gin.Context) (models.ProxyLink, error) {
 	raw, _ := c.GetRawData()
 	var l models.ProxyLink
 	if err := json.Unmarshal(raw, &l); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+		return l, err
 	}
 	if l.ID == "" {
 		l.ID = uuid.NewString()
@@ -159,25 +343,36 @@ func (a *AdminAPI) CreateLink(c *gin.Context) {
 		l.Attributes = models.Map{}
 	}
 	if err := validateLinkAttributes(l.Attributes, a.AttributeLimits); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+		return l, err
 	}
 	if l.CreatedAt.IsZero() {
 		l.CreatedAt = time.Now()
 	}
 	if len(l.Chain) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "chain must contain at least one provider"})
-		return
+		return l, fmt.Errorf("chain must contain at least one provider")
+	}
+	var rawPayload struct {
+		Chain []map[string]json.RawMessage `json:"chain"`
+	}
+	if err := json.Unmarshal(raw, &rawPayload); err != nil {
+		return l, err
+	}
+	for i, entry := range rawPayload.Chain {
+		if _, hasAPIKey := entry["api_key"]; hasAPIKey {
+			return l, fmt.Errorf("chain entry %s: API key must be configured on the provider", itoa(i))
+		}
 	}
 	// The first node fixes the link protocol. Every following node must select
 	// a compatible endpoint. The console does not ask users to choose a style;
 	// infer it from the primary provider and keep the chain internally safe.
 	for i := range l.Chain {
 		e := &l.Chain[i]
+		if err := validateModelPriorities(e.ModelPriorities); err != nil {
+			return l, fmt.Errorf("chain entry %s: %w", itoa(i), err)
+		}
 		provider, err := a.DB.GetProvider(e.ProviderID)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "chain entry " + itoa(i) + ": provider not found"})
-			return
+			return l, fmt.Errorf("chain entry %s: provider not found", itoa(i))
 		}
 		if e.Protocol == "" {
 			if i > 0 && l.Protocol != "" && providerSupportsProtocol(provider, l.Protocol) {
@@ -186,40 +381,51 @@ func (a *AdminAPI) CreateLink(c *gin.Context) {
 				e.Protocol = provider.Endpoints[0].Protocol
 			}
 			if e.Protocol == "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "chain entry " + itoa(i) + ": provider has no protocol endpoint"})
-				return
+				return l, fmt.Errorf("chain entry %s: provider has no protocol endpoint", itoa(i))
 			}
 		}
 		if !providerSupportsProtocol(provider, e.Protocol) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "chain entry " + itoa(i) + ": provider " + provider.Name + " does not support protocol " + e.Protocol})
-			return
+			return l, fmt.Errorf("chain entry %s: provider %s does not support protocol %s", itoa(i), provider.Name, e.Protocol)
 		}
 		if i == 0 {
 			if l.Protocol != "" && l.Protocol != e.Protocol {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "link protocol must match the first chain node protocol"})
-				return
+				return l, fmt.Errorf("link protocol must match the first chain node protocol")
 			}
 			l.Protocol = e.Protocol
 		} else if e.Protocol != l.Protocol {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "protocol mismatch: chain entry " + itoa(i) + " uses " + e.Protocol + ", but this link is " + l.Protocol})
-			return
+			return l, fmt.Errorf("protocol mismatch: chain entry %s uses %s, but this link is %s", itoa(i), e.Protocol, l.Protocol)
 		}
 	}
-	if err := a.DB.SaveLink(l); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+	return l, nil
+}
+
+func validateModelPriorities(priorities []models.ModelPriority) error {
+	if len(priorities) == 0 {
+		return fmt.Errorf("model_priorities must contain at least one item")
 	}
-	// Probe every node once after create/update and persist the result. A failed
-	// probe does not prevent saving the chain: it is shown as a gray node and
-	// can still recover before the next real request.
-	if a.Forwarder != nil {
-		l = a.Forwarder.ValidateChain(c.Request.Context(), l)
-		if err := a.DB.SaveLink(l); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
+	hasRequestModel := false
+	for i := range priorities {
+		priority := &priorities[i]
+		switch priority.Source {
+		case models.ModelPriorityRequestModel:
+			if strings.TrimSpace(priority.Model) != "" {
+				return fmt.Errorf("model_priorities[%d]: request_model must not include model", i)
+			}
+			if hasRequestModel {
+				return fmt.Errorf("model_priorities[%d]: request_model may appear only once", i)
+			}
+			hasRequestModel = true
+			priority.Model = ""
+		case models.ModelPriorityFixedModel:
+			priority.Model = strings.TrimSpace(priority.Model)
+			if priority.Model == "" {
+				return fmt.Errorf("model_priorities[%d]: fixed_model requires model", i)
+			}
+		default:
+			return fmt.Errorf("model_priorities[%d]: unsupported source %q", i, priority.Source)
 		}
 	}
-	c.JSON(http.StatusCreated, l)
+	return nil
 }
 
 func validateLinkAttributes(attributes models.Map, limits config.Storage) error {
@@ -282,7 +488,16 @@ func (a *AdminAPI) TestLink(c *gin.Context) {
 			return
 		}
 	}
-	l = a.Forwarder.ValidateChain(c.Request.Context(), l)
+	var payload struct {
+		Model string `json:"model"`
+	}
+	if c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&payload); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+	}
+	l = a.Forwarder.ValidateChainWithModel(c.Request.Context(), l, payload.Model)
 	if err := a.DB.SaveLink(l); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

@@ -34,6 +34,7 @@ function App() {
 
 	const [editingLink, setEditingLink] = useState<ProxyLink | null>(null);
 	const [loadingLink, setLoadingLink] = useState(false);
+	const [linkEditorDirty, setLinkEditorDirty] = useState(false);
 	const editId = useMemo(() => {
 		if (activeTab.startsWith("/links/edit/")) {
 			return activeTab.replace("/links/edit/", "");
@@ -54,14 +55,25 @@ function App() {
 		}
 	}, [editId]);
 
+	const navigateWithUnsavedLinkCheck = (path: string) => {
+		if (linkEditorDirty && !window.confirm(t.linkEditor.leaveConfirm)) return;
+		setLinkEditorDirty(false);
+		navigate(path);
+	};
+
 	const onLinkSaved = () => {
+		setLinkEditorDirty(false);
 		navigate("/links");
 	};
 
 	const renderContent = () => {
 		if (activeTab === "/links/new") {
 			return (
-				<LinkEditor onSaved={onLinkSaved} onCancel={() => navigate("/links")} />
+				<LinkEditor
+					onSaved={onLinkSaved}
+					onCancel={() => navigateWithUnsavedLinkCheck("/links")}
+					onDirtyChange={setLinkEditorDirty}
+				/>
 			);
 		}
 		if (editId) {
@@ -70,7 +82,8 @@ function App() {
 				<LinkEditor
 					link={editingLink}
 					onSaved={onLinkSaved}
-					onCancel={() => navigate("/links")}
+					onCancel={() => navigateWithUnsavedLinkCheck("/links")}
+					onDirtyChange={setLinkEditorDirty}
 				/>
 			);
 		}
@@ -91,7 +104,7 @@ function App() {
 						<NavPillGroup
 							items={tabs}
 							active={isActive("/links") ? "/links" : activeTab}
-							onChange={navigate}
+							onChange={navigateWithUnsavedLinkCheck}
 						/>
 						<LanguageSwitch />
 					</div>

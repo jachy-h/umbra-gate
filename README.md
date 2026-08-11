@@ -25,7 +25,7 @@ Your client uses one endpoint; UmbraGate handles routing and failover behind it.
 
 ## One console, from routing to proof
 
-Create a proxy link, inspect its capability check, and make the chain visible before your clients use it.
+Create a proxy link, inspect its capability check, and make the chain visible before your clients use it. While a link is saved, the console streams each provider's real validation progress and highlights the provider currently being checked.
 
 ![Proxy links show chain order and shared API capability](./imgs/links.png)
 
@@ -38,6 +38,8 @@ Filter operational results by link and time range to see request volume, success
 Build from source with `make && ./umbragate run` (requires Go and Node.js).
 
 - UmbraGate exposes one OpenAI-compatible endpoint to your application and routes requests through the providers configured in its link.
+- Providers can declare OpenAI and Anthropic protocol endpoints. The first node fixes the link protocol; every fallback must support that protocol.
+- Each chain node has ordered model priorities (the incoming request model or a fixed override) and a retry count. UmbraGate tries those model priorities in order before moving to the next fallback provider.
 - It probes each OpenAI node for Chat Completions and Responses support, exposing only the formats common to the link. Anthropic Messages remains native.
 - Call `/v1/chat/completions` or `/v1/responses` only when it appears in the link’s capability-check result. Anthropic-native nodes expose `/v1/messages`.
 - Tag links by project or use case; hourly analytics aggregate request volume, success rate, latency, and provider attempts.

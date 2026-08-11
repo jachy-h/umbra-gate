@@ -116,6 +116,38 @@ func (d *DB) ListProviders() ([]models.Provider, error) {
 	return out, rows.Err()
 }
 
+// UpdateProviderAPIKey updates only the credential owned by a Provider.
+func (d *DB) UpdateProviderAPIKey(id, apiKey string) error {
+	result, err := d.Exec(`UPDATE providers SET api_key=? WHERE id=?`, apiKey, id)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// UpdateProviderModels replaces a Provider's cached model catalog.
+func (d *DB) UpdateProviderModels(id string, providerModels []string) error {
+	result, err := d.Exec(`UPDATE providers SET models_json=? WHERE id=?`, enc(providerModels), id)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (d *DB) GetProvider(id string) (models.Provider, error) {
 	var p models.Provider
 	var endpointsJSON, modelsJSON, extraJSON string
@@ -170,8 +202,8 @@ func (d *DB) SaveLink(l models.ProxyLink) error {
 		if !e.ValidatedAt.IsZero() {
 			validatedAt = e.ValidatedAt.UTC()
 		}
-		if _, err := tx.Exec(`INSERT INTO proxy_link_providers(link_id,position,provider_id,protocol,retry_count,fallback_model,api_key,rules_json,validation_ok,validation_error,validated_at,supported_formats_json)
-			VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, l.ID, i, e.ProviderID, e.Protocol, e.RetryCount, e.FallbackModel, e.ApiKey, rules, validationOK, e.ValidationError, validatedAt, enc(e.SupportedFormats)); err != nil {
+		if _, err := tx.Exec(`INSERT INTO proxy_link_providers(link_id,position,provider_id,protocol,retry_count,model_priorities_json,rules_json,validation_ok,validation_error,validated_at,supported_formats_json)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?)`, l.ID, i, e.ProviderID, e.Protocol, e.RetryCount, enc(e.ModelPriorities), rules, validationOK, e.ValidationError, validatedAt, enc(e.SupportedFormats)); err != nil {
 			return err
 		}
 	}
@@ -255,7 +287,7 @@ func (d *DB) GetLink(id string) (models.ProxyLink, error) {
 }
 
 func (d *DB) loadChain(linkID string) ([]models.ChainEntry, error) {
-	rows, err := d.Query(`SELECT provider_id,protocol,retry_count,fallback_model,api_key,rules_json,validation_ok,validation_error,validated_at,supported_formats_json FROM proxy_link_providers WHERE link_id=? ORDER BY position`, linkID)
+	rows, err := d.Query(`SELECT provider_id,protocol,retry_count,model_priorities_json,rules_json,validation_ok,validation_error,validated_at,supported_formats_json FROM proxy_link_providers WHERE link_id=? ORDER BY position`, linkID)
 	if err != nil {
 		return nil, err
 	}
@@ -263,10 +295,10 @@ func (d *DB) loadChain(linkID string) ([]models.ChainEntry, error) {
 	chain := make([]models.ChainEntry, 0)
 	for rows.Next() {
 		var e models.ChainEntry
-		var rulesJSON, formatsJSON string
+		var prioritiesJSON, rulesJSON, formatsJSON string
 		var validationOK sql.NullInt64
 		var validatedAt sql.NullString
-		if err := rows.Scan(&e.ProviderID, &e.Protocol, &e.RetryCount, &e.FallbackModel, &e.ApiKey, &rulesJSON, &validationOK, &e.ValidationError, &validatedAt, &formatsJSON); err != nil {
+		if err := rows.Scan(&e.ProviderID, &e.Protocol, &e.RetryCount, &prioritiesJSON, &rulesJSON, &validationOK, &e.ValidationError, &validatedAt, &formatsJSON); err != nil {
 			return nil, err
 		}
 		if validationOK.Valid {
@@ -276,6 +308,7 @@ func (d *DB) loadChain(linkID string) ([]models.ChainEntry, error) {
 		if validatedAt.Valid {
 			e.ValidatedAt = parseTime(validatedAt.String)
 		}
+		_ = json.Unmarshal([]byte(prioritiesJSON), &e.ModelPriorities)
 		_ = json.Unmarshal([]byte(rulesJSON), &e.Rules)
 		_ = json.Unmarshal([]byte(formatsJSON), &e.SupportedFormats)
 		chain = append(chain, e)

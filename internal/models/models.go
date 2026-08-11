@@ -35,16 +35,25 @@ type Provider struct {
 
 type Map map[string]any
 
+const (
+	ModelPriorityRequestModel = "request_model"
+	ModelPriorityFixedModel   = "fixed_model"
+)
+
+type ModelPriority struct {
+	Source string `json:"source"`
+	Model  string `json:"model,omitempty"`
+}
+
 type ChainEntry struct {
-	ProviderID      string    `json:"provider_id"`
-	Protocol        string    `json:"protocol"`
-	RetryCount      int       `json:"retry_count"`       // extra retries on same provider before fallback
-	FallbackModel   string    `json:"fallback_model"`    // optional model override when falling back
-	ApiKey          string    `json:"api_key,omitempty"` // override provider's global api key
-	Rules           Rules     `json:"rules,omitempty"`   // when to fallback
-	ValidationOK    *bool     `json:"validation_ok,omitempty"`
-	ValidationError string    `json:"validation_error,omitempty"`
-	ValidatedAt     time.Time `json:"validated_at,omitempty"`
+	ProviderID      string          `json:"provider_id"`
+	Protocol        string          `json:"protocol"`
+	RetryCount      int             `json:"retry_count"` // extra retries for each configured model
+	ModelPriorities []ModelPriority `json:"model_priorities"`
+	Rules           Rules           `json:"rules,omitempty"` // when to fallback
+	ValidationOK    *bool           `json:"validation_ok,omitempty"`
+	ValidationError string          `json:"validation_error,omitempty"`
+	ValidatedAt     time.Time       `json:"validated_at,omitempty"`
 	// SupportedFormats is discovered by validation probes, rather than inferred
 	// from a provider type or a manually declared endpoint shape.
 	SupportedFormats []string `json:"supported_formats,omitempty"`

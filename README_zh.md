@@ -25,7 +25,7 @@ umbragate start
 
 ## 一个控制台，完成路由与验证
 
-创建代理 Link，确认能力检查结果，在客户端开始使用前看清整条链路。
+创建代理 Link，确认能力检查结果，在客户端开始使用前看清整条链路。保存 Link 时，控制台会流式显示每个 Provider 的真实校验进度，并高亮当前正在校验的 Provider。
 
 ![代理链接展示链路顺序与共享 API 能力](./imgs/links.png)
 
@@ -38,6 +38,8 @@ umbragate start
 可从源码构建并运行：`make && ./umbragate run`（需要 Go 和 Node.js）。
 
 - UmbraGate 为应用提供一个兼容 OpenAI 的端点，并通过 Link 中配置的 Provider 路由请求。
+- Provider 可声明 OpenAI 与 Anthropic 协议端点。第一个节点确定 Link 协议；每个回退节点都必须支持该协议。
+- 每个链路节点都有按顺序排列的模型优先级（传入的请求模型或固定覆盖模型）以及重试次数。UmbraGate 会依序尝试这些模型优先级，再切换到下一个回退 Provider。
 - 它会探测每个 OpenAI 节点对 Chat Completions 与 Responses 的支持，只暴露 Link 全链共同支持的格式；Anthropic Messages 保持原生协议。
 - 只有当 Link 的能力检查结果中出现相应格式时，才可调用 `/v1/chat/completions` 或 `/v1/responses`。Anthropic 原生节点提供 `/v1/messages`。
 - 可按项目或使用场景给 Link 加标签；小时统计汇总请求量、成功率、延迟和 Provider 尝试记录。

@@ -76,10 +76,6 @@ func (f *Forwarder) HandleRequest(w http.ResponseWriter, r *http.Request, link m
 			lastErr = fmt.Errorf("provider %s unavailable", entry.ProviderID)
 			continue
 		}
-		// Use chain-entry API key override if set, otherwise fall back to global provider key.
-		if entry.ApiKey != "" {
-			provider.APIKey = entry.ApiKey
-		}
 		protocol := entry.Protocol
 		if protocol == "" {
 			protocol = linkProtocol
@@ -96,56 +92,49 @@ func (f *Forwarder) HandleRequest(w http.ResponseWriter, r *http.Request, link m
 		}
 		provider.BaseURL = endpointURL(endpoint)
 
-		attempts := entry.RetryCount + 1
-		for attempt := 0; attempt < attempts; attempt++ {
-			modelOverride := origModel
-			// Use fallback model only when escalating past the first attempt or
-			// past the first chain entry (i.e. actually falling back).
-			if (attempt > 0 || i > 0) && entry.FallbackModel != "" {
-				modelOverride = entry.FallbackModel
-			}
-			upstreamBody, prepareErr := conversion.ConvertRequest(body, linkRequestFormat, endpoint.RequestFormat)
-			if prepareErr != nil {
-				lastErr = fmt.Errorf("provider %s request adaptation failed: %w", provider.Name, prepareErr)
-				break
-			}
-			req := openAIRequest(upstreamBody, modelOverride)
-			start := time.Now()
-			res := adapter.Forward(r.Context(), providers.FromModel(provider), req, modelOverride, endpoint.RequestFormat)
-			latency := time.Since(start).Milliseconds()
-			usedModel := modelOverride
-
-			validationErr := validateResult(res, endpoint.ResponseFormat)
-			clientBody := res.Body
-			if validationErr == nil {
-				clientBody, validationErr = conversion.ConvertResponse(res.Body, endpoint.ResponseFormat, linkResponseFormat)
-				if validationErr == nil {
-					validationErr = validateResult(providers.Result{StatusCode: res.StatusCode, Body: clientBody}, linkResponseFormat)
+		for _, modelOverride := range resolveModels(entry.ModelPriorities, origModel) {
+			attempts := entry.RetryCount + 1
+			for attempt := 0; attempt < attempts; attempt++ {
+				upstreamBody, prepareErr := conversion.ConvertRequest(body, linkRequestFormat, endpoint.RequestFormat)
+				if prepareErr != nil {
+					lastErr = fmt.Errorf("provider %s request adaptation failed: %w", provider.Name, prepareErr)
+					break
 				}
-			}
-			success := validationErr == nil
-			f.Stats.Record(models.RequestLog{
-				LinkID: link.ID, Path: link.Path, ProviderID: provider.ID,
-				ProviderName: provider.Name, Model: usedModel,
-				StatusCode: res.StatusCode, LatencyMS: latency,
-				Success: success, Attributes: attributes,
-				ErrorMessage: errStr(validationErr),
-				RequestURL:   requestURL, RequestHeaders: requestHeaders, RequestBody: logBody(body),
-				UpstreamURL: redactURL(res.RequestURL), UpstreamHeaders: redactStringHeaders(res.RequestHeaders), UpstreamBody: logBody(res.RequestBody),
-				ResponseHeaders: redactStringHeaders(res.ResponseHeaders), ResponseBody: logBody(res.Body), CreatedAt: time.Now(),
-			})
+				req := openAIRequest(upstreamBody, modelOverride)
+				start := time.Now()
+				res := adapter.Forward(r.Context(), providers.FromModel(provider), req, modelOverride, endpoint.RequestFormat)
+				latency := time.Since(start).Milliseconds()
 
-			if success {
-				writeJSON(w, res.StatusCode, clientBody)
-				return
-			}
-			lastErr = validationErr
-			lastStatus = res.StatusCode
-			lastBody = res.Body
+				validationErr := validateResult(res, endpoint.ResponseFormat)
+				clientBody := res.Body
+				if validationErr == nil {
+					clientBody, validationErr = conversion.ConvertResponse(res.Body, endpoint.ResponseFormat, linkResponseFormat)
+					if validationErr == nil {
+						validationErr = validateResult(providers.Result{StatusCode: res.StatusCode, Body: clientBody}, linkResponseFormat)
+					}
+				}
+				success := validationErr == nil
+				f.Stats.Record(models.RequestLog{
+					LinkID: link.ID, Path: link.Path, ProviderID: provider.ID,
+					ProviderName: provider.Name, Model: modelOverride,
+					StatusCode: res.StatusCode, LatencyMS: latency,
+					Success: success, Attributes: attributes,
+					ErrorMessage: errStr(validationErr),
+					RequestURL:   requestURL, RequestHeaders: requestHeaders, RequestBody: logBody(body),
+					UpstreamURL: redactURL(res.RequestURL), UpstreamHeaders: redactStringHeaders(res.RequestHeaders), UpstreamBody: logBody(res.RequestBody),
+					ResponseHeaders: redactStringHeaders(res.ResponseHeaders), ResponseBody: logBody(res.Body), CreatedAt: time.Now(),
+				})
 
-			// Every failed or malformed upstream response is handled inside the
-			// gateway. Continue to the next attempt/provider instead of asking the
-			// Agent to retry the request itself.
+				if success {
+					writeJSON(w, res.StatusCode, clientBody)
+					return
+				}
+				lastErr = validationErr
+				lastStatus = res.StatusCode
+				lastBody = res.Body
+
+				// Retry the current model before proceeding to the next priority.
+			}
 		}
 	}
 
@@ -264,13 +253,35 @@ func endpointURL(endpoint models.ProviderEndpoint) string {
 	}
 }
 
+// ValidationProgress identifies the provider node currently being checked.
+// It is emitted synchronously, immediately before its upstream probes begin.
+type ValidationProgress struct {
+	ChainIndex int    `json:"chain_index"`
+	ProviderID string `json:"provider_id"`
+}
+
 // ValidateChain actively probes every wire format rather than trusting a
 // provider type or endpoint declaration. The link's capability is the
 // intersection of all node capabilities.
 func (f *Forwarder) ValidateChain(ctx context.Context, link models.ProxyLink) models.ProxyLink {
+	return f.ValidateChainWithModel(ctx, link, "")
+}
+
+// ValidateChainWithModel runs Link validation with an optional request model.
+// When it is absent, request_model priorities are skipped.
+func (f *Forwarder) ValidateChainWithModel(ctx context.Context, link models.ProxyLink, requestModel string) models.ProxyLink {
+	return f.ValidateChainWithProgress(ctx, link, requestModel, nil)
+}
+
+// ValidateChainWithProgress emits each chain node immediately before its
+// validation begins, allowing callers to report real upstream progress.
+func (f *Forwarder) ValidateChainWithProgress(ctx context.Context, link models.ProxyLink, requestModel string, onProgress func(ValidationProgress)) models.ProxyLink {
 	link.SupportedFormats = nil
 	for i := range link.Chain {
 		entry := &link.Chain[i]
+		if onProgress != nil {
+			onProgress(ValidationProgress{ChainIndex: i, ProviderID: entry.ProviderID})
+		}
 		entry.ValidatedAt = time.Now()
 		entry.SupportedFormats = nil
 		entry.ValidationError = ""
@@ -285,9 +296,6 @@ func (f *Forwarder) ValidateChain(ctx context.Context, link models.ProxyLink) mo
 			entry.ValidationError = "provider unavailable"
 			continue
 		}
-		if entry.ApiKey != "" {
-			provider.APIKey = entry.ApiKey
-		}
 		protocol := entry.Protocol
 		if protocol == "" {
 			protocol = link.Protocol
@@ -298,12 +306,9 @@ func (f *Forwarder) ValidateChain(ctx context.Context, link models.ProxyLink) mo
 			entry.ValidationError = "provider adapter or endpoint unavailable"
 			continue
 		}
-		model := entry.FallbackModel
-		if model == "" && len(provider.Models) > 0 {
-			model = provider.Models[0]
-		}
-		if model == "" {
-			entry.ValidationError = "no model configured for validation"
+		validationModels := resolveModels(entry.ModelPriorities, requestModel)
+		if len(validationModels) == 0 {
+			entry.ValidationError = "no fixed model configured for validation"
 			continue
 		}
 		formats := []string{models.FormatChatCompletions, models.FormatResponses}
@@ -311,21 +316,25 @@ func (f *Forwarder) ValidateChain(ctx context.Context, link models.ProxyLink) mo
 			formats = []string{models.FormatMessages}
 		}
 		errs := []string{}
-		for _, format := range formats {
-			endpoint := base
-			endpoint.BaseURL = operationBaseURL(base.BaseURL)
-			endpoint.RequestFormat, endpoint.ResponseFormat = format, format
-			provider.BaseURL = endpointURL(endpoint)
-			body := validationBody(model, format)
-			probeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-			res := adapter.Forward(probeCtx, providers.FromModel(provider), openAIRequest(body, model), model, format)
-			cancel()
-			err := validateResult(res, format)
-			f.recordValidationAttempt(link, *entry, i, provider.Name, model, format, body, res, err)
-			if err == nil {
-				entry.SupportedFormats = append(entry.SupportedFormats, format)
-			} else {
-				errs = append(errs, format+": "+err.Error())
+		for _, model := range validationModels {
+			for _, format := range formats {
+				endpoint := base
+				endpoint.BaseURL = operationBaseURL(base.BaseURL)
+				endpoint.RequestFormat, endpoint.ResponseFormat = format, format
+				provider.BaseURL = endpointURL(endpoint)
+				body := validationBody(model, format)
+				probeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+				res := adapter.Forward(probeCtx, providers.FromModel(provider), openAIRequest(body, model), model, format)
+				cancel()
+				err := validateResult(res, format)
+				f.recordValidationAttempt(link, *entry, i, provider.Name, model, format, body, res, err)
+				if err == nil {
+					if !hasFormat(entry.SupportedFormats, format) {
+						entry.SupportedFormats = append(entry.SupportedFormats, format)
+					}
+				} else {
+					errs = append(errs, model+"/"+format+": "+err.Error())
+				}
 			}
 		}
 		if len(entry.SupportedFormats) > 0 {
@@ -341,6 +350,33 @@ func (f *Forwarder) ValidateChain(ctx context.Context, link models.ProxyLink) mo
 		}
 	}
 	return link
+}
+
+// resolveModels resolves configured priorities in order and de-duplicates the
+// resulting names for a single Provider node.
+func resolveModels(priorities []models.ModelPriority, requestModel string) []string {
+	resolved := make([]string, 0, len(priorities))
+	seen := make(map[string]struct{}, len(priorities))
+	for _, priority := range priorities {
+		var model string
+		switch priority.Source {
+		case models.ModelPriorityRequestModel:
+			model = strings.TrimSpace(requestModel)
+		case models.ModelPriorityFixedModel:
+			model = strings.TrimSpace(priority.Model)
+		default:
+			continue
+		}
+		if model == "" {
+			continue
+		}
+		if _, duplicate := seen[model]; duplicate {
+			continue
+		}
+		seen[model] = struct{}{}
+		resolved = append(resolved, model)
+	}
+	return resolved
 }
 
 func validationBody(model, format string) []byte {

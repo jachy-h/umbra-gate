@@ -73,6 +73,13 @@ export interface Translations {
 		deleteConfirm: string;
 		deleteFailed: string;
 		saveFailed: string;
+		showModels: string;
+		searchModels: string;
+		noModels: string;
+		noMatchingModels: string;
+		refreshModels: string;
+		refreshingModels: string;
+		refreshModelsFailed: string;
 		editProvider: string;
 		newProvider: string;
 		nameLabel: string;
@@ -116,6 +123,9 @@ export interface Translations {
 		edit: string;
 		del: string;
 		testTitle: string;
+		testModel: string;
+		testModelPlaceholder: string;
+		runTest: string;
 		deleteConfirm: string;
 		deleteFailed: string;
 		testFailed: string;
@@ -134,6 +144,8 @@ export interface Translations {
 		capabilityTitle: string;
 		capabilityDesc: string;
 		chainPreview: string;
+		validating: string;
+		validatingStep: string;
 		noProvidersInChain: string;
 		cancel: string;
 		saveLink: string;
@@ -146,19 +158,20 @@ export interface Translations {
 		moveUp: string;
 		moveDown: string;
 		remove: string;
-		autoDetectTitle: string;
-		autoDetectDesc: string;
 		providerLabel: string;
 		searchProvider: string;
 		retryLabel: string;
-		fallbackModelLabel: string;
-		fallbackModelPlaceholder: string;
-		apiKeyLabel: string;
-		apiKeyOverrideLabel: string;
-		apiKeyPlaceholder: string;
-		apiKeyPlaceholderHasGlobal: string;
+		modelPriorities: string;
+		requestModel: string;
+		fixedModelPlaceholder: string;
+		addRequestModel: string;
+		addFixedModel: string;
+		providerKeyMissing: string;
+		configureProvider: string;
+		providerKeyModalTitle: string;
 		selectProviderError: string;
 		saveFailed: string;
+		leaveConfirm: string;
 	};
 
 	// Request details modal

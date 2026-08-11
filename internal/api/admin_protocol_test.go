@@ -43,14 +43,14 @@ func TestCreateLinkRejectsMixedProtocolsAndPersistsFirstNodeProtocol(t *testing.
 	admin := &AdminAPI{DB: database}
 	router.POST("/admin/links", admin.CreateLink)
 
-	mixed := []byte(`{"name":"mixed","path":"mixed","chain":[{"provider_id":"multi","protocol":"openai"},{"provider_id":"anthropic-test","protocol":"anthropic"}]}`)
+	mixed := []byte(`{"name":"mixed","path":"mixed","chain":[{"provider_id":"multi","protocol":"openai","model_priorities":[{"source":"request_model"}]},{"provider_id":"anthropic-test","protocol":"anthropic","model_priorities":[{"source":"request_model"}]}]}`)
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/admin/links", bytes.NewReader(mixed)))
 	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "protocol mismatch") {
 		t.Fatalf("mixed protocol status = %d, body = %s", response.Code, response.Body.String())
 	}
 
-	matching := []byte(`{"name":"openai","path":"openai","chain":[{"provider_id":"multi"}]}`)
+	matching := []byte(`{"name":"openai","path":"openai","chain":[{"provider_id":"multi","model_priorities":[{"source":"request_model"}]}]}`)
 	response = httptest.NewRecorder()
 	router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/admin/links", bytes.NewReader(matching)))
 	if response.Code != http.StatusCreated {

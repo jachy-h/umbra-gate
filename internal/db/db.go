@@ -72,8 +72,7 @@ func (d *DB) migrate() error {
 			provider_id TEXT NOT NULL,
 			protocol TEXT NOT NULL DEFAULT '',
 			retry_count INTEGER NOT NULL DEFAULT 0,
-			fallback_model TEXT NOT NULL DEFAULT '',
-			api_key TEXT NOT NULL DEFAULT '',
+			model_priorities_json TEXT NOT NULL DEFAULT '[]',
 			rules_json TEXT NOT NULL DEFAULT '{}',
 			validation_ok INTEGER,
 			validation_error TEXT NOT NULL DEFAULT '',
@@ -82,7 +81,6 @@ func (d *DB) migrate() error {
 			PRIMARY KEY (link_id, position),
 			FOREIGN KEY (link_id) REFERENCES proxy_links(id) ON DELETE CASCADE
 		)`,
-		`ALTER TABLE proxy_link_providers ADD COLUMN api_key TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE proxy_link_providers ADD COLUMN protocol TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE proxy_link_providers ADD COLUMN validation_ok INTEGER`,
 		`ALTER TABLE proxy_link_providers ADD COLUMN validation_error TEXT NOT NULL DEFAULT ''`,
@@ -146,7 +144,94 @@ func (d *DB) migrate() error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
-	return nil
+	return d.migrateLinkModelPriorities()
+}
+
+// migrateLinkModelPriorities upgrades the legacy Link-node table in one
+// transaction so Link-scoped credentials are removed atomically.
+func (d *DB) migrateLinkModelPriorities() error {
+	rows, err := d.Query(`PRAGMA table_info(proxy_link_providers)`)
+	if err != nil {
+		return fmt.Errorf("inspect proxy_link_providers schema: %w", err)
+	}
+	defer rows.Close()
+
+	columns := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull, primaryKey int
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &primaryKey); err != nil {
+			return fmt.Errorf("read proxy_link_providers schema: %w", err)
+		}
+		columns[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate proxy_link_providers schema: %w", err)
+	}
+	if columns["model_priorities_json"] && !columns["fallback_model"] && !columns["api_key"] {
+		return nil
+	}
+	if !columns["fallback_model"] || !columns["api_key"] {
+		return fmt.Errorf("unsupported proxy_link_providers schema")
+	}
+
+	tx, err := d.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`CREATE TABLE proxy_link_providers_v08 (
+		link_id TEXT NOT NULL,
+		position INTEGER NOT NULL,
+		provider_id TEXT NOT NULL,
+		protocol TEXT NOT NULL DEFAULT '',
+		retry_count INTEGER NOT NULL DEFAULT 0,
+		model_priorities_json TEXT NOT NULL DEFAULT '[]',
+		rules_json TEXT NOT NULL DEFAULT '{}',
+		validation_ok INTEGER,
+		validation_error TEXT NOT NULL DEFAULT '',
+		validated_at DATETIME,
+		supported_formats_json TEXT NOT NULL DEFAULT '[]',
+		PRIMARY KEY (link_id, position),
+		FOREIGN KEY (link_id) REFERENCES proxy_links(id) ON DELETE CASCADE
+	)`); err != nil {
+		return fmt.Errorf("create v0.8 Link-node table: %w", err)
+	}
+
+	legacyRows, err := tx.Query(`SELECT link_id,position,provider_id,protocol,retry_count,fallback_model,rules_json,validation_ok,validation_error,validated_at,supported_formats_json FROM proxy_link_providers ORDER BY link_id,position`)
+	if err != nil {
+		return fmt.Errorf("read legacy Link nodes: %w", err)
+	}
+	defer legacyRows.Close()
+	for legacyRows.Next() {
+		var linkID, providerID, protocol, fallbackModel, rulesJSON, validationError, formatsJSON string
+		var position, retryCount int
+		var validationOK sql.NullInt64
+		var validatedAt sql.NullString
+		if err := legacyRows.Scan(&linkID, &position, &providerID, &protocol, &retryCount, &fallbackModel, &rulesJSON, &validationOK, &validationError, &validatedAt, &formatsJSON); err != nil {
+			return fmt.Errorf("scan legacy Link node: %w", err)
+		}
+		priorities := []models.ModelPriority{{Source: models.ModelPriorityRequestModel}}
+		if model := strings.TrimSpace(fallbackModel); model != "" {
+			priorities = append(priorities, models.ModelPriority{Source: models.ModelPriorityFixedModel, Model: model})
+		}
+		if _, err := tx.Exec(`INSERT INTO proxy_link_providers_v08(link_id,position,provider_id,protocol,retry_count,model_priorities_json,rules_json,validation_ok,validation_error,validated_at,supported_formats_json)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?)`, linkID, position, providerID, protocol, retryCount, enc(priorities), rulesJSON, validationOK, validationError, validatedAt, formatsJSON); err != nil {
+			return fmt.Errorf("copy legacy Link node: %w", err)
+		}
+	}
+	if err := legacyRows.Err(); err != nil {
+		return fmt.Errorf("iterate legacy Link nodes: %w", err)
+	}
+	if _, err := tx.Exec(`DROP TABLE proxy_link_providers`); err != nil {
+		return fmt.Errorf("drop legacy Link-node table: %w", err)
+	}
+	if _, err := tx.Exec(`ALTER TABLE proxy_link_providers_v08 RENAME TO proxy_link_providers`); err != nil {
+		return fmt.Errorf("rename v0.8 Link-node table: %w", err)
+	}
+	return tx.Commit()
 }
 
 // DatabaseSize returns the on-disk SQLite database and its WAL size.
@@ -227,7 +312,7 @@ func (d *DB) seed() error {
 	}
 	builtins := []seedProvider{
 		{id: "deepseek", name: "DeepSeek", typ: "deepseek", baseURL: "https://api.deepseek.com",
-			models: []string{"deepseek-chat", "deepseek-reasoner"}},
+			models: []string{}},
 		{id: "opencode", name: "OpenCode", typ: "opencode", baseURL: "https://opencode.ai/zen/v1",
 			models: []string{}},
 		{id: "opencode-go", name: "OpenCode Go", typ: "opencode", baseURL: "https://opencode.ai/zen/go/v1",
@@ -259,6 +344,12 @@ func (d *DB) seed() error {
 		}
 		// Update models if provider already existed but had no models
 		d.Exec(`UPDATE providers SET models_json=? WHERE id=? AND (models_json='[]' OR models_json='' OR models_json='{}')`, enc(p.models), p.id)
+	}
+	// Earlier releases seeded deprecated DeepSeek model names. Remove only that
+	// known catalog; remotely discovered or manually configured models remain.
+	if _, err := d.Exec(`UPDATE providers SET models_json=? WHERE id='deepseek' AND builtin=1 AND models_json=?`,
+		enc([]string{}), enc([]string{"deepseek-chat", "deepseek-reasoner"})); err != nil {
+		return err
 	}
 	if err := d.backfillProviderEndpoints(); err != nil {
 		return err

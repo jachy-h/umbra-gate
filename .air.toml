@@ -6,6 +6,7 @@ tmp_dir = "tmp"
 # hashed asset names match the files in internal/web/dist.
 cmd = "cd web && npm run build && cd .. && go build -o ./tmp/umbragate ."
 bin = "./tmp/umbragate"
+args_bin = ["run"]
 include_ext = ["go", "html", "css", "ts", "tsx"]
 exclude_dir = ["tmp", "vendor", "web/node_modules", "internal/web/dist"]
 exclude_regex = ["_test.go"]
