@@ -15,3 +15,6 @@ internal/web/dist/assets/
 internal/web/dist/*.svg
 internal/web/dist/favicon.svg
 internal/web/dist/icons.svg
+router.db
+router.db-shm
+router.db-wal
