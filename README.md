@@ -17,7 +17,7 @@ umbragate start
 ## Quick start (for users)
 
 1. Open **<http://localhost:8787>**.
-2. Add API keys to the preconfigured providers, or create your own.
+2. Add API keys to the preconfigured providers (DeepSeek, OpenCode, and OpenRouter), or create your own.
 3. Create a link: put the provider with the best cost-performance first and a backup provider after it. UmbraGate automatically tries the backup if the first provider runs out of quota, is rate-limited, times out, or becomes unstable.
 4. Paste the link URL into OpenCode, Cursor, a ChatGPT client, or any OpenAI-compatible client.
 
@@ -29,7 +29,7 @@ Create a proxy link, inspect its capability check, and make the chain visible be
 
 ![Proxy links show chain order and shared API capability](./imgs/links.png)
 
-Filter operational results by link and time range to see request volume, success rate, failures, latency, and recent provider attempts.
+Filter operational results by link and time range to see request volume, success rate, failures, latency, and recent provider attempts. The recent-requests list also includes link tests, each marked with a “Link Test” badge.
 
 ![Statistics show link-level request volume, reliability, latency, and recent requests](./imgs/statistics.png)
 
@@ -40,6 +40,8 @@ Build from source with `make && ./umbragate run` (requires Go and Node.js).
 - UmbraGate exposes one OpenAI-compatible endpoint to your application and routes requests through the providers configured in its link.
 - Providers can declare OpenAI and Anthropic protocol endpoints. The first node fixes the link protocol; every fallback must support that protocol.
 - Each chain node has ordered model priorities (the incoming request model or a fixed override) and a retry count. UmbraGate tries those model priorities in order before moving to the next fallback provider.
+- API keys live on the Provider, never on the Link. A link only references providers that already hold their own credentials; keyless providers remain usable.
+- Refresh a Provider's model catalog from the Providers page, or load it automatically in the Link editor when you pick a provider (OpenRouter returns up to 500 models).
 - It probes each OpenAI node for Chat Completions and Responses support, exposing only the formats common to the link. Anthropic Messages remains native.
 - Call `/v1/chat/completions` or `/v1/responses` only when it appears in the link’s capability-check result. Anthropic-native nodes expose `/v1/messages`.
 - Tag links by project or use case; hourly analytics aggregate request volume, success rate, latency, and provider attempts.

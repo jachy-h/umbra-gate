@@ -17,7 +17,7 @@ umbragate start
 ## 用户快速上手
 
 1. 打开 **<http://localhost:8787>**。
-2. 为预置 Provider 填入 API Key，或创建自己的 Provider。
+2. 为预置 Provider（DeepSeek、OpenCode、OpenRouter）填入 API Key，或创建自己的 Provider。
 3. 创建一个 Link：将性价比更高的 Provider 放在前面，备用 Provider 放在后面。当前者额度耗尽、被限流、超时或流量不稳定时，UmbraGate 会自动尝试备用 Provider。
 4. 将 Link URL 填入 OpenCode、Cursor、ChatGPT 客户端或任何 OpenAI 兼容客户端。
 
@@ -29,7 +29,7 @@ umbragate start
 
 ![代理链接展示链路顺序与共享 API 能力](./imgs/links.png)
 
-按 Link 和时间范围筛选，查看请求量、成功率、失败数、延迟及最近的 Provider 尝试。
+按 Link 和时间范围筛选，查看请求量、成功率、失败数、延迟及最近的 Provider 尝试。最近请求列表也包含链路测试记录，每条都带有「Link Test」标记。
 
 ![统计页面展示 Link 维度的请求量、可靠性、延迟与最近请求](./imgs/statistics.png)
 
@@ -40,6 +40,8 @@ umbragate start
 - UmbraGate 为应用提供一个兼容 OpenAI 的端点，并通过 Link 中配置的 Provider 路由请求。
 - Provider 可声明 OpenAI 与 Anthropic 协议端点。第一个节点确定 Link 协议；每个回退节点都必须支持该协议。
 - 每个链路节点都有按顺序排列的模型优先级（传入的请求模型或固定覆盖模型）以及重试次数。UmbraGate 会依序尝试这些模型优先级，再切换到下一个回退 Provider。
+- API Key 只归属于 Provider，Link 不保存密钥。Link 仅引用已持有自身凭据的 Provider；无需密钥的 Provider 仍可正常使用。
+- 可从 Provider 管理页刷新 Provider 的模型目录，或在 Link 编辑器中选择 Provider 时自动加载（OpenRouter 最多返回 500 个模型）。
 - 它会探测每个 OpenAI 节点对 Chat Completions 与 Responses 的支持，只暴露 Link 全链共同支持的格式；Anthropic Messages 保持原生协议。
 - 只有当 Link 的能力检查结果中出现相应格式时，才可调用 `/v1/chat/completions` 或 `/v1/responses`。Anthropic 原生节点提供 `/v1/messages`。
 - 可按项目或使用场景给 Link 加标签；小时统计汇总请求量、成功率、延迟和 Provider 尝试记录。
