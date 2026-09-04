@@ -7,7 +7,7 @@ import (
 	"github.com/jachy-h/llm-gateway-lite/internal/models"
 )
 
-func TestProviderSeedsIncludeOnlyDeepSeekAndOpenCode(t *testing.T) {
+func TestProviderSeedsIncludeOnlyBuiltinProviders(t *testing.T) {
 	database, err := Open(filepath.Join(t.TempDir(), "gateway.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -18,13 +18,39 @@ func TestProviderSeedsIncludeOnlyDeepSeekAndOpenCode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(providers) != 3 {
-		t.Fatalf("provider count = %d, want 3", len(providers))
+	if len(providers) != 4 {
+		t.Fatalf("provider count = %d, want 4", len(providers))
 	}
 	for _, provider := range providers {
-		if !provider.Builtin || (provider.ID != "deepseek" && provider.ID != "opencode" && provider.ID != "opencode-go") {
+		if !provider.Builtin || (provider.ID != "deepseek" && provider.ID != "opencode" && provider.ID != "opencode-go" && provider.ID != "openrouter") {
 			t.Fatalf("unexpected built-in provider: %+v", provider)
 		}
+	}
+}
+
+func TestOpenRouterSeedDeclaresOpenAIEndpoint(t *testing.T) {
+	database, err := Open(filepath.Join(t.TempDir(), "gateway.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	provider, err := database.GetProvider("openrouter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.BaseURL != "https://openrouter.ai/api/v1" {
+		t.Fatalf("OpenRouter base URL = %q", provider.BaseURL)
+	}
+	if len(provider.Endpoints) != 1 {
+		t.Fatalf("OpenRouter endpoints = %+v", provider.Endpoints)
+	}
+	endpoint := provider.Endpoints[0]
+	if endpoint.Protocol != models.ProtocolOpenAI ||
+		endpoint.RequestFormat != models.FormatChatCompletions ||
+		endpoint.ResponseFormat != models.FormatChatCompletions ||
+		endpoint.BaseURL != "https://openrouter.ai/api/v1" {
+		t.Fatalf("OpenRouter endpoint contract = %+v", endpoint)
 	}
 }
 

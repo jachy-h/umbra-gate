@@ -174,7 +174,7 @@ func (a *AdminAPI) RefreshProviderModels(c *gin.Context) {
 }
 
 func (a *AdminAPI) fetchProviderModels(ctx context.Context, p models.Provider) ([]string, error) {
-	endpoint, err := providerModelsURL(p.BaseURL)
+	endpoint, err := providerModelsURL(p.BaseURL, p.Type)
 	if err != nil {
 		return nil, err
 	}
@@ -223,7 +223,7 @@ func (a *AdminAPI) fetchProviderModels(ctx context.Context, p models.Provider) (
 	return providerModels, nil
 }
 
-func providerModelsURL(baseURL string) (string, error) {
+func providerModelsURL(baseURL, providerType string) (string, error) {
 	parsed, err := url.Parse(strings.TrimSpace(baseURL))
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return "", fmt.Errorf("provider has an invalid base URL")
@@ -231,6 +231,11 @@ func providerModelsURL(baseURL string) (string, error) {
 	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/models"
 	parsed.RawQuery = ""
 	parsed.Fragment = ""
+	// OpenRouter paginates its model catalog; request the full listing up to
+	// 500 entries in one page per its documented interface.
+	if providerType == "openrouter" {
+		parsed.RawQuery = "limit=500"
+	}
 	return parsed.String(), nil
 }
 

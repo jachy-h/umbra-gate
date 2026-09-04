@@ -47,6 +47,8 @@ export function ProviderManager() {
 	const [keyValue, setKeyValue] = useState("");
 	const [modelsProvider, setModelsProvider] = useState<Provider | null>(null);
 	const [modelSearch, setModelSearch] = useState("");
+	const [refreshingModels, setRefreshingModels] = useState(false);
+	const [refreshModelsError, setRefreshModelsError] = useState("");
 
 	const fetchAll = () => {
 		setLoading(true);
@@ -239,6 +241,26 @@ export function ProviderManager() {
 		}));
 	};
 
+	const refreshModels = async (p: Provider) => {
+		setRefreshingModels(true);
+		setRefreshModelsError("");
+		try {
+			const updated = await api.refreshProviderModels(p.id);
+			setModelsProvider(updated);
+			setProviders((current) =>
+				current.map((provider) =>
+					provider.id === updated.id ? updated : provider,
+				),
+			);
+		} catch (e: unknown) {
+			setRefreshModelsError(
+				e instanceof Error ? e.message : t.providers.refreshModelsFailed,
+			);
+		} finally {
+			setRefreshingModels(false);
+		}
+	};
+
 	const matchingModels = (modelsProvider?.models ?? []).filter((model) =>
 		model.toLowerCase().includes(modelSearch.trim().toLowerCase()),
 	);
@@ -376,7 +398,9 @@ export function ProviderManager() {
 												size="sm"
 												onClick={() => {
 													setModelSearch("");
+													setRefreshModelsError("");
 													setModelsProvider(p);
+													if (!(p.models?.length)) refreshModels(p);
 												}}
 												className="min-w-[76px]"
 											>
@@ -450,10 +474,26 @@ export function ProviderManager() {
 						)}
 					</div>
 				</div>
-				<div className="mt-5 flex justify-end">
-					<Button variant="secondary" onClick={() => setModelsProvider(null)}>
-						{t.providers.cancel}
-					</Button>
+				<div className="mt-5 flex items-center justify-between gap-3">
+					{refreshModelsError && (
+						<p className="min-w-0 flex-1 text-sm text-[var(--color-error)]">
+							{refreshModelsError}
+						</p>
+					)}
+					<div className="flex shrink-0 justify-end gap-3">
+						<Button
+							variant="secondary"
+							onClick={() => modelsProvider && refreshModels(modelsProvider)}
+							disabled={refreshingModels}
+						>
+							{refreshingModels
+								? t.providers.refreshingModels
+								: t.providers.refreshModels}
+						</Button>
+						<Button variant="secondary" onClick={() => setModelsProvider(null)}>
+							{t.providers.cancel}
+						</Button>
+					</div>
 				</div>
 			</Modal>
 

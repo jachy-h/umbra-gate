@@ -21,7 +21,7 @@ type ProviderEndpoint struct {
 type Provider struct {
 	ID        string             `json:"id"`
 	Name      string             `json:"name"`
-	Type      string             `json:"type"`     // openai | anthropic | gemini | deepseek | qwen | custom
+	Type      string             `json:"type"`     // openai | anthropic | gemini | deepseek | qwen | custom | openrouter
 	BaseURL   string             `json:"base_url"` // legacy primary URL; endpoints is authoritative
 	Endpoints []ProviderEndpoint `json:"endpoints"`
 	APIKey    string             `json:"api_key,omitempty"`

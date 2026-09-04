@@ -301,7 +301,7 @@ func decMap(s string) models.Map {
 }
 
 func (d *DB) seed() error {
-	const providerSeedVersion = "2026-07-24-opencode-base-prefix"
+	const providerSeedVersion = "2026-09-04-openrouter"
 
 	type seedProvider struct {
 		id      string
@@ -316,6 +316,8 @@ func (d *DB) seed() error {
 		{id: "opencode", name: "OpenCode", typ: "opencode", baseURL: "https://opencode.ai/zen/v1",
 			models: []string{}},
 		{id: "opencode-go", name: "OpenCode Go", typ: "opencode", baseURL: "https://opencode.ai/zen/go/v1",
+			models: []string{}},
+		{id: "openrouter", name: "OpenRouter", typ: "openrouter", baseURL: "https://openrouter.ai/api/v1",
 			models: []string{}},
 	}
 

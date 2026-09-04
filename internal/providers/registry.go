@@ -35,7 +35,7 @@ func AdapterForProtocol(typeName, protocol string) (Adapter, bool) {
 		return AdapterFor("anthropic")
 	case models.ProtocolOpenAI:
 		switch typeName {
-		case "openai", "deepseek", "qwen", "custom", "opencode", "gemini", "anthropic":
+		case "openai", "deepseek", "qwen", "custom", "opencode", "gemini", "anthropic", "openrouter":
 			return AdapterFor("openai")
 		default:
 			// Preserve explicitly registered extension adapters.
@@ -53,6 +53,7 @@ func initBuiltins() {
 	registry["qwen"] = newOpenAI("qwen")
 	registry["custom"] = newOpenAI("custom")
 	registry["opencode"] = newOpenAI("opencode")
+	registry["openrouter"] = newOpenAI("openrouter")
 	registry["anthropic"] = AnthropicAdapter{}
 	registry["gemini"] = newOpenAI("gemini")
 }
