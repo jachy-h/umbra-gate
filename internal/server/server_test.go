@@ -45,7 +45,7 @@ func TestStatsEndpointAggregatesLatestRequestsOnDemand(t *testing.T) {
 	}
 }
 
-func TestRecentRequestsExcludesLinkTestsAndIncludesProxyRequests(t *testing.T) {
+func TestRecentRequestsIncludesLinkTestsMarked(t *testing.T) {
 	database, err := db.Open(filepath.Join(t.TempDir(), "gateway.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -74,8 +74,11 @@ func TestRecentRequestsExcludesLinkTestsAndIncludesProxyRequests(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &logs); err != nil {
 		t.Fatal(err)
 	}
-	if len(logs) != 1 || logs[0].ID != "proxy-request" {
-		t.Fatalf("recent requests = %+v, want only the proxy request", logs)
+	if len(logs) != 2 || logs[0].ID != "proxy-request" || logs[1].ID != "link-test" {
+		t.Fatalf("recent requests = %+v, want proxy request first then the link test", logs)
+	}
+	if logs[1].Attributes["_request_type"] != "link_validation" {
+		t.Fatalf("link test was not marked: %+v", logs[1].Attributes)
 	}
 }
 

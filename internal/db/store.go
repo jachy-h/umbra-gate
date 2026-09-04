@@ -333,9 +333,10 @@ func (d *DB) ListRecentLogs(limit int) ([]models.RequestLog, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 100
 	}
+	// Includes link test requests. They are marked in the Attributes map with
+	// `_request_type: "link_validation"` so the UI can badge them.
 	rows, err := d.Query(`SELECT id,link_id,path,provider_id,provider_name,model,status_code,latency_ms,success,error_message,request_url,request_headers_json,request_body,upstream_url,upstream_headers_json,upstream_body,response_headers_json,response_body,attributes_json,created_at
 		FROM request_logs
-		WHERE COALESCE(json_extract(attributes_json, '$._request_type'), '') != 'link_validation'
 		ORDER BY created_at DESC, rowid DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err

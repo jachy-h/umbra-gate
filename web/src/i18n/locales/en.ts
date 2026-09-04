@@ -37,9 +37,9 @@ const en: Translations = {
 		tableFailure: "Failure",
 		tableAvgLatency: "Avg Latency",
 		tableSuccessRate: "Success Rate",
-		latestRequests: "Latest 100 Proxy Requests",
+		latestRequests: "Latest 100 Requests",
 		latestRequestsDesc:
-			"Each provider attempt is recorded, including automatic fallback attempts. Link Test records appear on the Links page.",
+			"All gateway traffic is shown, including automatic fallback attempts and link tests (marked with a Link Test badge).",
 		noRequests: "No requests recorded yet.",
 		tableTime: "Time",
 		tableProvider: "Provider",

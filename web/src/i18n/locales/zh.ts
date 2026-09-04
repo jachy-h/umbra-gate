@@ -36,9 +36,9 @@ const zh: Translations = {
 		tableFailure: "失败",
 		tableAvgLatency: "平均延迟",
 		tableSuccessRate: "成功率",
-		latestRequests: "最近 100 条代理请求",
+		latestRequests: "最新 100 条记录",
 		latestRequestsDesc:
-			"记录每次供应商请求，包括自动回退尝试。链接测试记录显示在链接页面。",
+			"展示全部网关流量，包括自动回退尝试与链接测试（带「链接测试」标记）。",
 		noRequests: "暂无请求记录。",
 		tableTime: "时间",
 		tableProvider: "供应商",
