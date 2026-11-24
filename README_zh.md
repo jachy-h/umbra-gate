@@ -7,12 +7,14 @@
 **UmbraGate** 是一个自包含的 LLM 网关：为所有 AI 客户端提供一个兼容 OpenAI 的端点，而后端模型由你自由选择。路由请求、自动故障切换、查看用量，全都在本地 Web 控制台完成——无需 Docker，无需配置数据库。
 
 ```bash
-brew tap jachy-h/umbragate
-brew trust --tap jachy-h/umbragate
+brew tap jachy-h/jachy-h
+brew trust --tap jachy-h/jachy-h
 brew install umbragate
 umbragate start
 # 打开 http://localhost:8787
 ```
+
+Homebrew tap 已迁移至 `jachy-h/homebrew-jachy-h`（tap 名 `jachy-h/jachy-h`）。如果你之前 tap 过旧的 `jachy-h/umbragate`，请先执行一次 `brew untap jachy-h/umbragate`，再运行上面的命令。
 
 ## 用户快速上手
 

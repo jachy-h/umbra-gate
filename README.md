@@ -7,12 +7,14 @@
 **UmbraGate** is a self-contained LLM gateway that gives every AI client one OpenAI-compatible endpoint, while you choose the providers behind it. Route requests, fail over automatically, and see usage in one local web console—no Docker or database setup.
 
 ```bash
-brew tap jachy-h/umbragate
-brew trust --tap jachy-h/umbragate
+brew tap jachy-h/jachy-h
+brew trust --tap jachy-h/jachy-h
 brew install umbragate
 umbragate start
 # Open http://localhost:8787
 ```
+
+The Homebrew tap lives at `jachy-h/homebrew-jachy-h` (tapped as `jachy-h/jachy-h`). If you tapped the old `jachy-h/umbragate` tap before, run `brew untap jachy-h/umbragate` once and then the commands above.
 
 ## Quick start (for users)
 

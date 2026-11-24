@@ -18,3 +18,6 @@ internal/web/dist/icons.svg
 router.db
 router.db-shm
 router.db-wal
+
+# macOS metadata
+.DS_Store

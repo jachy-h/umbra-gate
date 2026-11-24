@@ -42,6 +42,8 @@ git push origin vX.Y.Z
 
 The GitHub Actions release workflow validates that the tag is SemVer, checks out the tag’s exact commit, reruns the production release gate, then creates Darwin arm64/x86_64 archives, SHA-256 checksums, and the GitHub Release. It updates the Homebrew tap when `HOMEBREW_TAP_TOKEN` is configured.
 
+The Homebrew tap lives in `jachy-h/homebrew-jachy-h` (tapped as `jachy-h/jachy-h`, formula at `Formula/umbragate.rb`). Never point the workflow or the READMEs at the retired `jachy-h/homebrew-umbragate` repository name; the archived name only redirects for existing users. If the tap repository is ever renamed again, update `.github/workflows/release.yml`, both READMEs, and this section in the same commit.
+
 Manual dispatch is for an **existing** tag only: enter the exact `vX.Y.Z` tag, never a branch name or a prospective version.
 
 ## 4. Verify publication
